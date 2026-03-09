@@ -4,3 +4,4 @@ dist/
 *.local
 .DS_Store
 *.msi
+package-lock.json

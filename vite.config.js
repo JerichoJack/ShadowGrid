@@ -1,18 +1,20 @@
 import { defineConfig } from 'vite';
 import { viteStaticCopy } from 'vite-plugin-static-copy';
-import { resolve } from 'path';
 
-const cesiumSource = 'node_modules/cesium/Build/Cesium';
+const cesiumSource  = 'node_modules/cesium/Build/Cesium';
 const cesiumBaseUrl = 'cesiumStatic';
 
 export default defineConfig({
   define: {
-    // Required: tells CesiumJS where to find its static assets at runtime
+    // Tells CesiumJS where to find its static assets at runtime.
+    // During dev, Vite serves them from the root via the alias below.
+    // During build, viteStaticCopy puts them at /cesiumStatic/.
     CESIUM_BASE_URL: JSON.stringify(`/${cesiumBaseUrl}/`),
   },
 
   plugins: [
-    // Copy CesiumJS static assets (workers, icons, terrain encoders) into /dist
+    // Copies Cesium static assets into /dist at build time.
+    // vite-plugin-static-copy also serves them in dev via its devServer option.
     viteStaticCopy({
       targets: [
         { src: `${cesiumSource}/ThirdParty`, dest: cesiumBaseUrl },
@@ -23,8 +25,12 @@ export default defineConfig({
     }),
   ],
 
+  // Allow Vite's dev server to serve files from node_modules/cesium
   server: {
     port: 5173,
+    fs: {
+      allow: ['..'],
+    },
     proxy: {
       '/api/celestrak': {
         target: 'https://celestrak.org',
@@ -39,10 +45,15 @@ export default defineConfig({
     },
   },
 
+  // Prevent Vite from trying to bundle the massive CesiumJS library —
+  // let it load from its pre-built IIFE instead.
+  optimizeDeps: {
+    exclude: ['cesium'],
+  },
+
   build: {
     rollupOptions: {
       output: {
-        // Keep Cesium in its own chunk — it's large (~4MB) and changes rarely
         manualChunks: {
           cesium: ['cesium'],
         },

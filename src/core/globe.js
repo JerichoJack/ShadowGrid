@@ -4,188 +4,200 @@
  *
  * Controlled by VITE_MAP_PROVIDER in your .env:
  *
- *   google    — Google Maps Photorealistic 3D Tiles (best visuals, needs billing enabled)
  *   cesium    — Cesium ion World Terrain + OSM Buildings (free, no credit card)
+ *   google    — Google Maps Photorealistic 3D Tiles (best visuals, needs billing)
  *   maptiler  — MapTiler terrain + satellite imagery (free tier, no credit card)
- *
- * Docs:
- *   https://developers.google.com/maps/documentation/tile/3d-tiles
- *   https://cesium.com/platform/cesium-ion/
- *   https://docs.maptiler.com/cesium/
  */
 
 import * as Cesium from 'cesium';
 import 'cesium/Build/Cesium/Widgets/widgets.css';
 
-const PROVIDER        = (import.meta.env.VITE_MAP_PROVIDER         ?? 'cesium').toLowerCase();
-const GOOGLE_KEY      =  import.meta.env.VITE_GOOGLE_MAPS_API_KEY  ?? '';
-const CESIUM_TOKEN    =  import.meta.env.VITE_CESIUM_ION_TOKEN     ?? '';
-const MAPTILER_KEY    =  import.meta.env.VITE_MAPTILER_API_KEY     ?? '';
+const PROVIDER     = (import.meta.env.VITE_MAP_PROVIDER        ?? 'cesium').toLowerCase();
+const GOOGLE_KEY   =  import.meta.env.VITE_GOOGLE_MAPS_API_KEY ?? '';
+const CESIUM_TOKEN =  import.meta.env.VITE_CESIUM_ION_TOKEN    ?? '';
+const MAPTILER_KEY =  import.meta.env.VITE_MAPTILER_API_KEY    ?? '';
 
-const GOOGLE_TILESET_URL =
-  `https://tile.googleapis.com/v1/3dtiles/root.json?key=${GOOGLE_KEY}`;
+const GOOGLE_TILESET_URL     = `https://tile.googleapis.com/v1/3dtiles/root.json?key=${GOOGLE_KEY}`;
+const MAPTILER_TERRAIN_URL   = `https://api.maptiler.com/tiles/terrain-quantized-mesh-v2/tiles.json?key=${MAPTILER_KEY}`;
+const MAPTILER_SATELLITE_URL = `https://api.maptiler.com/tiles/satellite-v2/{z}/{x}/{y}.jpg?key=${MAPTILER_KEY}`;
 
-const MAPTILER_TERRAIN_URL =
-  `https://api.maptiler.com/tiles/terrain-quantized-mesh-v2/tiles.json?key=${MAPTILER_KEY}`;
-
-const MAPTILER_SATELLITE_URL =
-  `https://api.maptiler.com/tiles/satellite-v2/{z}/{x}/{y}.jpg?key=${MAPTILER_KEY}`;
-
-// ── Entry point ──────────────────────────────────────────────────────────────
+// ── Entry point ───────────────────────────────────────────────────────────────
 
 export async function initGlobe(containerId) {
-  window.CESIUM_BASE_URL = '/cesium'; // served by vite-plugin-cesium
-
-  // Set ion token if provided (needed even for non-ion providers to suppress warnings)
-  if (CESIUM_TOKEN) Cesium.Ion.defaultAccessToken = CESIUM_TOKEN;
-
-  const viewer = createViewer(containerId);
-
-  switch (PROVIDER) {
-    case 'google':    await mountGoogle(viewer);    break;
-    case 'maptiler':  await mountMapTiler(viewer);  break;
-    case 'cesium':
-    default:          await mountCesiumIon(viewer); break;
+  // Set ion token before anything else
+  if (CESIUM_TOKEN) {
+    Cesium.Ion.defaultAccessToken = CESIUM_TOKEN;
+  } else {
+    console.warn('[WorldView] No VITE_CESIUM_ION_TOKEN set. Get a free token at https://ion.cesium.com');
   }
 
-  window.__wv_viewer = viewer; // handy for console debugging
-  return viewer;
+  switch (PROVIDER) {
+    case 'google':   return initGoogle(containerId);
+    case 'maptiler': return initMapTiler(containerId);
+    case 'cesium':
+    default:         return initCesiumIon(containerId);
+  }
 }
 
-// ── Shared viewer factory ────────────────────────────────────────────────────
+// ── Shared base viewer options ────────────────────────────────────────────────
 
-function createViewer(containerId) {
-  const viewer = new Cesium.Viewer(containerId, {
-    animation:             false,
-    baseLayerPicker:       false,
-    fullscreenButton:      false,
-    geocoder:              false,
-    homeButton:            false,
-    infoBox:               false,
-    navigationHelpButton:  false,
-    sceneModePicker:       false,
-    selectionIndicator:    false,
-    timeline:              false,
-    vrButton:              false,
-    imageryProvider:       false,   // each provider mounts its own
-    scene3DOnly:           true,
-    requestRenderMode:     false,   // continuous for live data layers
-    shadows:               false,
-  });
+function baseOptions() {
+  return {
+    animation:            false,
+    baseLayerPicker:      false,
+    fullscreenButton:     false,
+    geocoder:             false,
+    homeButton:           false,
+    infoBox:              false,
+    navigationHelpButton: false,
+    sceneModePicker:      false,
+    selectionIndicator:   false,
+    timeline:             false,
+    vrButton:             false,
+    scene3DOnly:          true,
+    requestRenderMode:    false,
+    shadows:              false,
+    // Suppress default imagery — each provider sets its own
+    imageryProvider:      false,
+  };
+}
 
+function applySceneSettings(viewer) {
   const scene = viewer.scene;
   scene.backgroundColor                = Cesium.Color.BLACK;
   scene.fog.enabled                    = false;
   scene.globe.enableLighting           = false;
   scene.globe.depthTestAgainstTerrain  = true;
   scene.postProcessStages.fxaa.enabled = true;
+}
 
+// ── Provider: Cesium ion ──────────────────────────────────────────────────────
+
+async function initCesiumIon(containerId) {
+  console.info('[WorldView] Provider: Cesium ion');
+
+  // Resolve terrain BEFORE constructing Viewer — avoids the async-in-constructor hang
+  let terrainProvider;
+  try {
+    terrainProvider = await Cesium.CesiumTerrainProvider.fromIonAssetId(1, {
+      requestWaterMask:     true,
+      requestVertexNormals: true,
+    });
+  } catch (err) {
+    console.warn('[WorldView] World Terrain failed, using ellipsoid:', err.message);
+    terrainProvider = new Cesium.EllipsoidTerrainProvider();
+  }
+
+  const viewer = new Cesium.Viewer(containerId, {
+    ...baseOptions(),
+    terrainProvider,
+  });
+
+  applySceneSettings(viewer);
+
+  // Add Bing satellite imagery
+  try {
+    const bing = await Cesium.IonImageryProvider.fromAssetId(2);
+    viewer.imageryLayers.addImageryProvider(bing);
+  } catch (err) {
+    console.warn('[WorldView] Bing imagery unavailable:', err.message);
+    // Fallback to OpenStreetMap so the globe isn't blank
+    viewer.imageryLayers.addImageryProvider(
+      new Cesium.OpenStreetMapImageryProvider({ url: 'https://tile.openstreetmap.org/' })
+    );
+  }
+
+  // OSM 3D Buildings
+  try {
+    const osm = await Cesium.createOsmBuildingsAsync();
+    viewer.scene.primitives.add(osm);
+  } catch (err) {
+    console.warn('[WorldView] OSM Buildings unavailable:', err.message);
+  }
+
+  window.__wv_viewer = viewer;
+  console.info('[WorldView] Cesium ion ready ✓');
   return viewer;
 }
 
-// ── Provider: Google Photorealistic 3D Tiles ─────────────────────────────────
+// ── Provider: Google Photorealistic 3D Tiles ──────────────────────────────────
 
-async function mountGoogle(viewer) {
+async function initGoogle(containerId) {
   if (!GOOGLE_KEY) {
-    console.warn(
-      '[WorldView] VITE_MAP_PROVIDER=google but VITE_GOOGLE_MAPS_API_KEY is not set.\n' +
-      'Falling back to Cesium ion. Add your key to .env or switch provider.'
-    );
-    return mountCesiumIon(viewer);
+    console.warn('[WorldView] No VITE_GOOGLE_MAPS_API_KEY — falling back to Cesium ion.');
+    return initCesiumIon(containerId);
   }
 
+  console.info('[WorldView] Provider: Google Photorealistic 3D Tiles');
+
+  const viewer = new Cesium.Viewer(containerId, {
+    ...baseOptions(),
+    terrainProvider: new Cesium.EllipsoidTerrainProvider(),
+  });
+
+  applySceneSettings(viewer);
+  viewer.scene.globe.show = false; // 3D Tiles replace the globe surface
+
   try {
-    // Google 3D Tiles replaces the globe surface entirely
-    viewer.scene.globe.show = false;
-
-    // Increase simultaneous tile requests for Google's CDN
     Cesium.RequestScheduler.requestsByServer['tile.googleapis.com:443'] = 18;
-
     const tileset = await Cesium.Cesium3DTileset.fromUrl(GOOGLE_TILESET_URL, {
       showCreditsOnScreen:     true,
       maximumScreenSpaceError: 8,
     });
-
     viewer.scene.primitives.add(tileset);
     await viewer.zoomTo(tileset);
-
-    console.info('[WorldView] Provider: Google Photorealistic 3D Tiles ✓');
+    console.info('[WorldView] Google 3D Tiles ready ✓');
   } catch (err) {
     console.error('[WorldView] Google 3D Tiles failed — falling back to Cesium ion:', err.message);
     viewer.scene.globe.show = true;
-    await mountCesiumIon(viewer);
+    return initCesiumIon(containerId);
   }
+
+  window.__wv_viewer = viewer;
+  return viewer;
 }
 
-// ── Provider: Cesium ion (free tier) ─────────────────────────────────────────
+// ── Provider: MapTiler ────────────────────────────────────────────────────────
 
-async function mountCesiumIon(viewer) {
-  if (!CESIUM_TOKEN) {
-    console.warn(
-      '[WorldView] VITE_CESIUM_ION_TOKEN is not set.\n' +
-      'Cesium ion features (terrain, OSM buildings) require a free token.\n' +
-      'Get one at https://ion.cesium.com — falling back to ellipsoid terrain.'
-    );
-    return;
+async function initMapTiler(containerId) {
+  if (!MAPTILER_KEY) {
+    console.warn('[WorldView] No VITE_MAPTILER_API_KEY — falling back to Cesium ion.');
+    return initCesiumIon(containerId);
   }
 
+  console.info('[WorldView] Provider: MapTiler');
+
+  // Resolve terrain before Viewer construction
+  let terrainProvider;
   try {
-    // World Terrain
-    viewer.terrainProvider = await Cesium.createWorldTerrainAsync({
-      requestWaterMask:     true,
+    terrainProvider = await Cesium.CesiumTerrainProvider.fromUrl(MAPTILER_TERRAIN_URL, {
       requestVertexNormals: true,
     });
-
-    // Bing satellite imagery (included in Cesium ion free tier)
-    viewer.imageryLayers.addImageryProvider(
-      await Cesium.IonImageryProvider.fromAssetId(2)  // Bing Maps Aerial
-    );
-
-    // OSM Buildings (3D building footprints, worldwide)
-    const osmBuildings = await Cesium.createOsmBuildingsAsync();
-    viewer.scene.primitives.add(osmBuildings);
-
-    console.info('[WorldView] Provider: Cesium ion (terrain + OSM buildings) ✓');
   } catch (err) {
-    console.error('[WorldView] Cesium ion failed:', err.message);
-    throw err;
-  }
-}
-
-// ── Provider: MapTiler (free tier) ───────────────────────────────────────────
-
-async function mountMapTiler(viewer) {
-  if (!MAPTILER_KEY) {
-    console.warn(
-      '[WorldView] VITE_MAP_PROVIDER=maptiler but VITE_MAPTILER_API_KEY is not set.\n' +
-      'Falling back to Cesium ion. Get a free key at https://cloud.maptiler.com'
-    );
-    return mountCesiumIon(viewer);
+    console.warn('[WorldView] MapTiler terrain failed — falling back to Cesium ion:', err.message);
+    return initCesiumIon(containerId);
   }
 
-  try {
-    // MapTiler quantized-mesh terrain
-    viewer.terrainProvider = await Cesium.CesiumTerrainProvider.fromUrl(
-      MAPTILER_TERRAIN_URL,
-      { requestWaterMask: false, requestVertexNormals: true }
-    );
+  const viewer = new Cesium.Viewer(containerId, {
+    ...baseOptions(),
+    terrainProvider,
+  });
 
-    // MapTiler satellite imagery draped over terrain
-    viewer.imageryLayers.removeAll();
-    viewer.imageryLayers.addImageryProvider(
-      new Cesium.UrlTemplateImageryProvider({
-        url:          MAPTILER_SATELLITE_URL,
-        credit:       '© MapTiler © OpenStreetMap contributors',
-        minimumLevel: 0,
-        maximumLevel: 20,
-        tileWidth:    256,
-        tileHeight:   256,
-      })
-    );
+  applySceneSettings(viewer);
 
-    console.info('[WorldView] Provider: MapTiler (terrain + satellite) ✓');
-  } catch (err) {
-    console.error('[WorldView] MapTiler failed — falling back to Cesium ion:', err.message);
-    await mountCesiumIon(viewer);
-  }
+  viewer.imageryLayers.removeAll();
+  viewer.imageryLayers.addImageryProvider(
+    new Cesium.UrlTemplateImageryProvider({
+      url:          MAPTILER_SATELLITE_URL,
+      credit:       '© MapTiler © OpenStreetMap contributors',
+      minimumLevel: 0,
+      maximumLevel: 20,
+      tileWidth:    256,
+      tileHeight:   256,
+    })
+  );
+
+  window.__wv_viewer = viewer;
+  console.info('[WorldView] MapTiler ready ✓');
+  return viewer;
 }
