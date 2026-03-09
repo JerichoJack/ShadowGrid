@@ -9,13 +9,13 @@ All of it running in a browser tab. No classified clearances required.
 ## ✨ Features
 
 - **Photorealistic 3D Globe** — powered by your choice of Google 3D Tiles, Cesium ion, or MapTiler (switchable via a single env variable)
-- **Live Air Traffic** — 7,000+ aircraft positions from OpenSky Network and ADS-B Exchange (including military flight tracking), updated in real time
-- **Satellite Orbital Tracking** — 180+ satellites rendered on their actual orbital paths using CelesTrak TLE data; click any satellite to follow it
-- **Street-Level Traffic** — vehicle flow on city streets from OpenStreetMap, rendered as a particle system
-- **CCTV Integration** — real public traffic camera feeds geographically placed and projected as textures onto 3D buildings
-- **Visual Shader Modes** — toggle between NVG (night vision), FLIR thermal, CRT scan lines, and anime cel-shading, each built from studying real military display specifications
-- **4D Timeline / Replay** — scrub through archived snapshots of all data layers to reconstruct how a scene looked at any point in time
-- **"God Mode"** — detection overlays combining all layers: every vehicle highlighted, military flights with callsigns, satellites in orbit, and CCTV feeds in one unified view
+- **Live Air Traffic** — thousands of aircraft from your chosen flight data provider, updated every 15s
+- **Satellite Orbital Tracking** — 180+ satellites rendered on actual orbital paths using real TLE data; click any to follow it
+- **Street-Level Traffic** — vehicle flow on city streets from OpenStreetMap, rendered as a particle system *(Phase 5)*
+- **CCTV Integration** — real public traffic camera feeds projected as textures onto 3D buildings *(Phase 6)*
+- **Visual Shader Modes** — NVG (night vision), FLIR thermal, CRT scan lines, and anime cel-shading
+- **4D Timeline / Replay** — scrub through archived snapshots of all data layers *(Phase 7)*
+- **"God Mode"** — all layers combined: every vehicle highlighted, military flights, satellites, and CCTV in one unified view
 
 ---
 
@@ -24,70 +24,108 @@ All of it running in a browser tab. No classified clearances required.
 | Layer | Technology |
 |---|---|
 | 3D Globe & Rendering | [CesiumJS](https://cesium.com/platform/cesiumjs/) |
-| Photorealistic City Models | Google / Cesium ion / MapTiler *(switchable — see below)* |
+| Photorealistic City Models | Google / Cesium ion / MapTiler *(switchable)* |
 | Visual Shaders | WebGL `PostProcessStage` (inline GLSL) |
-| Live Flight Data | [OpenSky Network](https://opensky-network.org/) + [ADS-B Exchange](https://www.adsbexchange.com/) |
+| Live Flight Data | adsb.fi / adsb.lol / OpenSky Network *(switchable)* |
 | Satellite Orbital Math | [satellite.js](https://github.com/shashwatak/satellite-js) (SGP4 propagation) |
-| Satellite TLE Data | [CelesTrak](https://celestrak.org/) |
+| Satellite TLE Data | CelesTrak / Space-Track / N2YO *(switchable)* |
 | Street / Road Data | [OpenStreetMap](https://www.openstreetmap.org/) + Overpass API |
-| CCTV Feeds | Public city traffic cam endpoints (MJPEG streams → VideoTexture) |
+| CCTV Feeds | Public city traffic cam endpoints (MJPEG → VideoTexture) |
 | Data Archival / Replay | Node.js cron jobs + SQLite / Postgres |
 | Hosting | Vercel / Cloudflare Pages + lightweight VPS for data proxy |
 
 ---
 
-## 🗺️ Map Provider Comparison
+## 🗺️ Map Provider Options
 
-WorldView supports three map backends, switchable with a single line in your `.env`. No code changes required.
+Set `VITE_MAP_PROVIDER` in your `.env` to switch instantly — no code changes.
 
-| Provider | Visual Quality | Cost | Credit Card Required | Best For |
+| Provider | Visual Quality | Cost | Credit Card? | Notes |
 |---|---|---|---|---|
-| **Google 3D Tiles** | ⭐⭐⭐ Photogrammetric | Free tier ($200/mo credit) | ✅ Yes (billing account) | Production / best experience |
-| **Cesium ion** | ⭐⭐ Terrain + OSM buildings | 100% free | ❌ No | Development / zero cost |
-| **MapTiler** | ⭐⭐ Terrain + satellite | 100% free tier | ❌ No | Dev / mid-quality satellite |
+| `google` | ⭐⭐⭐ Photogrammetric | Free tier ($200/mo credit) | ✅ Required | Best possible visuals |
+| `cesium` | ⭐⭐ Terrain + OSM buildings | 100% free | ❌ No | Recommended default |
+| `maptiler` | ⭐⭐ Terrain + satellite | 100% free tier | ❌ No | Good mid-ground option |
 
-Set your choice in `.env`:
+---
 
-```env
-VITE_MAP_PROVIDER=cesium      # or: google | maptiler
-```
+## ✈️ Flight Data Provider Options
+
+Set `VITE_FLIGHT_PROVIDER` in your `.env` to switch.
+
+| Provider | Coverage | Cost | Account / Key? | Notes |
+|---|---|---|---|---|
+| `adsbfi` | Global, ~20k+ aircraft | Free | ❌ None required | **Recommended default** |
+| `adsbool` | Global, unfiltered | Free | ❌ None required | Includes military / untracked flights; ODbL licensed |
+| `opensky` | Global, ~10k aircraft | Free (non-commercial) | ✅ OAuth2 client credentials | Migrated from username/password in March 2025 |
+
+---
+
+## 🛰️ Satellite TLE Provider Options
+
+Set `VITE_SATELLITE_PROVIDER` in your `.env` to switch.
+
+| Provider | Objects | Cost | Account / Key? | Notes |
+|---|---|---|---|---|
+| `celestrak` | 20,000+ | Free | ❌ None required | **Recommended default**; transitioning to OMM format ~July 2026 |
+| `spacetrack` | Full catalog | Free | ✅ Free account (login) | Authoritative US Space Force data |
+| `n2yo` | Targeted queries | Free tier (1k req/hr) | ✅ Free API key | Better for per-satellite lookups |
 
 ---
 
 ## 🔑 API Keys Setup
 
-### 1. Google Maps Platform *(only needed for `VITE_MAP_PROVIDER=google`)*
+### 🌍 Map Providers
 
-1. Go to the [Google Cloud Console](https://console.cloud.google.com) and create or select a project
-2. Enable the **Map Tiles API**: [direct link](https://console.cloud.google.com/apis/library/tile.googleapis.com)
-3. Go to **Credentials → Create API Key** and copy it
-4. *(Recommended)* Click the key → **Restrict key** → limit to "Map Tiles API" and your domain
-5. Enable billing on your project — you won't be charged unless you exceed $200/mo of usage, which is unlikely during development
+**Google Maps** *(only for `VITE_MAP_PROVIDER=google`)*
+1. Go to [Google Cloud Console](https://console.cloud.google.com) and create/select a project
+2. Enable the [Map Tiles API](https://console.cloud.google.com/apis/library/tile.googleapis.com)
+3. Go to **Credentials → Create API Key**, then restrict it to "Map Tiles API"
+4. Enable billing — the $200/mo free credit covers typical development usage
 
-### 2. Cesium ion *(recommended for everyone — free, no credit card)*
-
+**Cesium ion** *(for `VITE_MAP_PROVIDER=cesium` — also recommended for all setups)*
 1. Create a free account at [ion.cesium.com](https://ion.cesium.com)
-2. Navigate to **Access Tokens → Create token** (default scopes are fine)
-3. Copy the token into `VITE_CESIUM_ION_TOKEN`
+2. **Access Tokens → Create token** (default scopes are fine)
+3. Paste into `VITE_CESIUM_ION_TOKEN`
 
-> Even if you're using Google or MapTiler as your map provider, setting a Cesium ion token suppresses console warnings about unauthenticated ion requests from the CesiumJS library itself.
+> Even if using Google or MapTiler, setting a Cesium ion token suppresses console warnings from the CesiumJS library itself.
 
-### 3. MapTiler *(only needed for `VITE_MAP_PROVIDER=maptiler`)*
-
+**MapTiler** *(only for `VITE_MAP_PROVIDER=maptiler`)*
 1. Create a free account at [cloud.maptiler.com](https://cloud.maptiler.com)
-2. Navigate to **Account → API Keys** and copy your default key
-3. The free tier includes global terrain + satellite imagery with no credit card required
+2. **Account → API Keys** → copy your default key
+3. Paste into `VITE_MAPTILER_API_KEY`
 
-### 4. OpenSky Network *(optional — improves flight data rate limits)*
+---
+
+### ✈️ Flight Data Providers
+
+**adsb.fi** and **adsb.lol** — no setup required. Just set `VITE_FLIGHT_PROVIDER=adsbfi` or `adsbool` and go.
+
+**OpenSky Network** *(for `VITE_FLIGHT_PROVIDER=opensky`)*
+
+> ⚠️ OpenSky migrated to **OAuth2 in March 2025**. The old `username:password` method no longer works for new accounts. You now need API client credentials.
 
 1. Create a free account at [opensky-network.org](https://opensky-network.org)
-2. Add your username and password to `VITE_OPENSKY_USERNAME` and `VITE_OPENSKY_PASSWORD`
-3. Without credentials the API still works but is rate-limited to ~10 requests/10 minutes per IP
+2. Go to your **Account page → "API Client" section**
+3. Click **Create API Client** — a `credentials.json` file will download
+4. Open it and copy `client_id` → `VITE_OPENSKY_CLIENT_ID`
+5. Copy `client_secret` → `VITE_OPENSKY_CLIENT_SECRET`
 
-### 5. ADS-B Exchange *(optional — adds military & untracked flights)*
+Rate limits: 4,000 credits/day authenticated · anonymous access is heavily throttled.
 
-1. Visit [adsbexchange.com/data](https://www.adsbexchange.com/data/) and sign up for API access
-2. Add your key to `VITE_ADSB_EXCHANGE_API_KEY`
+---
+
+### 🛰️ Satellite TLE Providers
+
+**CelesTrak** — no setup required. Set `VITE_SATELLITE_PROVIDER=celestrak` and go.
+
+**Space-Track** *(for `VITE_SATELLITE_PROVIDER=spacetrack`)*
+1. Register for a free account at [space-track.org](https://www.space-track.org)
+2. Add your login to `VITE_SPACETRACK_USERNAME` and `VITE_SPACETRACK_PASSWORD`
+
+**N2YO** *(for `VITE_SATELLITE_PROVIDER=n2yo`)*
+1. Request a free API key at [n2yo.com/api](https://www.n2yo.com/api/)
+2. Paste into `VITE_N2YO_API_KEY`
+3. Free tier: 1,000 requests/hour
 
 ---
 
@@ -96,7 +134,7 @@ VITE_MAP_PROVIDER=cesium      # or: google | maptiler
 ### Prerequisites
 
 - Node.js v18+
-- At minimum a **free Cesium ion token** (see API Keys above)
+- At minimum, a **free Cesium ion token** is recommended (no credit card)
 
 ### Installation
 
@@ -106,27 +144,30 @@ cd WorldView
 npm install
 ```
 
-### Environment Variables
+### Minimum viable setup (fully free, zero cost, no credit card)
 
 ```bash
 cp .env.example .env
-# Open .env and fill in your keys
 ```
 
-The minimum viable setup (fully free, no credit card):
+Then set these three lines in `.env`:
 
 ```env
 VITE_MAP_PROVIDER=cesium
 VITE_CESIUM_ION_TOKEN=your_cesium_ion_token_here
+
+VITE_FLIGHT_PROVIDER=adsbfi
+
+VITE_SATELLITE_PROVIDER=celestrak
 ```
 
-### Run Locally
+### Run locally
 
 ```bash
 npm run dev
 ```
 
-Open [http://localhost:5173](http://localhost:5173) in your browser.
+Open [http://localhost:5173](http://localhost:5173)
 
 ---
 
@@ -136,16 +177,16 @@ Open [http://localhost:5173](http://localhost:5173) in your browser.
 WorldView/
 ├── src/
 │   ├── core/
-│   │   ├── globe.js              # CesiumJS viewer + provider switcher
-│   │   └── camera.js             # Fly-to, orbit, and navigation controls
+│   │   ├── globe.js              # CesiumJS viewer + map provider switcher
+│   │   └── camera.js             # Fly-to, orbit, navigation + city presets
 │   ├── layers/
-│   │   ├── flights.js            # OpenSky + ADS-B live aircraft layer
-│   │   ├── satellites.js         # CelesTrak TLE fetch + satellite.js propagation
+│   │   ├── flights.js            # Flight provider switcher (adsb.fi / adsb.lol / OpenSky)
+│   │   ├── satellites.js         # Satellite provider switcher (CelesTrak / Space-Track / N2YO)
 │   │   ├── traffic.js            # OSM road network + particle system (Phase 5)
-│   │   └── cctv.js               # Public cam feeds projected onto buildings (Phase 6)
+│   │   └── cctv.js               # CCTV feeds projected onto buildings (Phase 6)
 │   ├── ui/
 │   │   ├── HUD.js                # Targeting reticle + click-to-inspect panel
-│   │   ├── Controls.js           # Layer toggles + shader mode buttons
+│   │   ├── Controls.js           # Layer toggles + shader mode buttons + GLSL shaders
 │   │   └── clock.js              # UTC clock
 │   └── archive/
 │       └── collector.js          # Node.js cron: polls APIs, writes snapshots (Phase 7)
@@ -163,8 +204,10 @@ WorldView/
 ## 🗺️ Build Roadmap
 
 - [x] Phase 1 — CesiumJS globe with switchable map provider (Google / Cesium ion / MapTiler)
-- [ ] Phase 2 — Live flight layer (OpenSky + ADS-B)
-- [ ] Phase 3 — Satellite orbital tracking (CelesTrak + satellite.js)
+- [x] Phase 1 — Switchable flight data providers (adsb.fi / adsb.lol / OpenSky)
+- [x] Phase 1 — Switchable satellite TLE providers (CelesTrak / Space-Track / N2YO)
+- [ ] Phase 2 — Live flight layer polish (ADS-B military callsigns, altitude filters)
+- [ ] Phase 3 — Satellite orbital tracking polish (click-to-track, orbital period display)
 - [ ] Phase 4 — Visual shaders (NVG, FLIR, CRT, Anime)
 - [ ] Phase 5 — Street traffic particle system (OSM)
 - [ ] Phase 6 — CCTV feed projection onto 3D buildings
@@ -181,8 +224,6 @@ WorldView/
 | **FLIR** | Thermal false-color (iron palette) simulating infrared sensors |
 | **CRT** | Retro scanline overlay with barrel distortion and phosphor bloom |
 | **Anime** | Cel-shading via Sobel edge detection + quantized color bands |
-
-Shaders are applied as full-screen WebGL post-processing passes and can be toggled live without reloading any data layers.
 
 ---
 
@@ -207,6 +248,10 @@ MIT License — see [LICENSE](./LICENSE) for details.
 - [Google Maps Platform](https://developers.google.com/maps) — Photorealistic 3D Tiles
 - [Cesium ion](https://ion.cesium.com) — hosted terrain and imagery
 - [MapTiler](https://www.maptiler.com) — terrain and satellite tile services
-- [OpenSky Network](https://opensky-network.org) — live flight data
-- [CelesTrak](https://celestrak.org) — satellite TLE data
+- [adsb.fi](https://adsb.fi) — free community ADS-B flight data
+- [adsb.lol](https://adsb.lol) — free open ADS-B flight data (ODbL)
+- [OpenSky Network](https://opensky-network.org) — open flight data research network
+- [CelesTrak](https://celestrak.org) — free satellite TLE data
+- [Space-Track.org](https://space-track.org) — US Space Force satellite catalog
+- [N2YO](https://n2yo.com) — satellite tracking API
 - [satellite.js](https://github.com/shashwatak/satellite-js) — SGP4 orbital propagation
