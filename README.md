@@ -47,8 +47,8 @@ All of it running in a browser tab. No classified clearances required.
 ### Installation
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/worldview.git
-cd worldview
+git clone https://github.com/JerichoJack/WorldView.git
+cd WorldView
 npm install
 ```
 
@@ -112,12 +112,12 @@ worldview/
 ## 🗺️ Build Roadmap
 
 - [x] Phase 1 — CesiumJS globe with Google Photorealistic 3D Tiles
-- [x] Phase 2 — Live flight layer (OpenSky + ADS-B)
-- [x] Phase 3 — Satellite orbital tracking (CelesTrak + satellite.js)
-- [x] Phase 4 — Visual shaders (NVG, FLIR, CRT, Anime)
-- [x] Phase 5 — Street traffic particle system (OSM)
-- [x] Phase 6 — CCTV feed projection onto 3D buildings
-- [x] Phase 7 — 4D timeline + data archival / replay
+- [ ] Phase 2 — Live flight layer (OpenSky + ADS-B)
+- [ ] Phase 3 — Satellite orbital tracking (CelesTrak + satellite.js)
+- [ ] Phase 4 — Visual shaders (NVG, FLIR, CRT, Anime)
+- [ ] Phase 5 — Street traffic particle system (OSM)
+- [ ] Phase 6 — CCTV feed projection onto 3D buildings
+- [ ] Phase 7 — 4D timeline + data archival / replay
 
 ---
 
