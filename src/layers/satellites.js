@@ -40,11 +40,11 @@ const MAX_SATS      = 200;   // cap for performance
 // ── CelesTrak GP JSON feeds (no key, no rate limit) ──────────────────────────
 // Using the new GP JSON endpoint which supports catalog numbers > 69999
 const CELESTRAK_FEEDS = [
-  { label: 'ISS',      url: 'https://celestrak.org/NORAD/elements/gp.php?CATNR=25544&FORMAT=TLE' },
-  { label: 'Stations', url: 'https://celestrak.org/NORAD/elements/gp.php?GROUP=stations&FORMAT=TLE' },
-  { label: 'Starlink', url: 'https://celestrak.org/NORAD/elements/gp.php?GROUP=starlink&FORMAT=TLE' },
-  { label: 'Military', url: 'https://celestrak.org/NORAD/elements/gp.php?GROUP=military&FORMAT=TLE' },
-  { label: 'Active',   url: 'https://celestrak.org/NORAD/elements/gp.php?GROUP=active&FORMAT=TLE' },
+  { label: 'ISS',      url: '/api/celestrak/NORAD/elements/gp.php?CATNR=25544&FORMAT=TLE' },
+  { label: 'Stations', url: '/api/celestrak/NORAD/elements/gp.php?GROUP=stations&FORMAT=TLE' },
+  { label: 'Starlink', url: '/api/celestrak/NORAD/elements/gp.php?GROUP=starlink&FORMAT=TLE' },
+  { label: 'Military', url: '/api/celestrak/NORAD/elements/gp.php?GROUP=military&FORMAT=TLE' },
+  { label: 'Active',   url: '/api/celestrak/NORAD/elements/gp.php?GROUP=active&FORMAT=TLE' },
 ];
 
 // ── Space-Track feeds (free account required at space-track.org) ──────────────

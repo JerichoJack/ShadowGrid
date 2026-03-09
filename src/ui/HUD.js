@@ -16,7 +16,7 @@ export function initHUD(viewer) {
 function drawReticle(viewer) {
   const canvas = viewer.canvas;
 
-  const overlay   = document.createElement('canvas');
+  const overlay = document.createElement('canvas');
   overlay.style.cssText = `
     position: fixed; inset: 0;
     pointer-events: none; z-index: 9;
@@ -38,7 +38,6 @@ function drawReticle(viewer) {
     const gap = 5;
 
     ctx.clearRect(0, 0, overlay.width, overlay.height);
-
     ctx.strokeStyle = 'rgba(0,255,136,0.55)';
     ctx.lineWidth   = 1;
 
@@ -56,8 +55,7 @@ function drawReticle(viewer) {
     ctx.stroke();
 
     // Corner ticks at cardinal angles
-    const ticks = [0, Math.PI/2, Math.PI, 3*Math.PI/2];
-    ticks.forEach(angle => {
+    [0, Math.PI/2, Math.PI, 3*Math.PI/2].forEach(angle => {
       const x  = cx + (r - 6) * Math.cos(angle);
       const y  = cy + (r - 6) * Math.sin(angle);
       const x2 = cx + (r + 4) * Math.cos(angle);
@@ -100,8 +98,7 @@ function initEntityPicker(viewer) {
   close.textContent = '✕';
   close.style.cssText = `
     position: absolute; top: 8px; right: 12px;
-    cursor: pointer; opacity: 0.5;
-    font-size: 12px;
+    cursor: pointer; opacity: 0.5; font-size: 12px;
   `;
   close.addEventListener('click', () => { panel.style.display = 'none'; });
   panel.appendChild(close);
@@ -122,28 +119,27 @@ function initEntityPicker(viewer) {
 
     if (type === 'flight') {
       const callsign = props.callsign?.getValue() ?? '–';
-      const altFt    = props.altitude?.getValue();   // stored in feet
-      const spdKts   = props.velocity?.getValue();   // stored in knots
+      const altFt    = props.altFt?.getValue();     // feet (stored as-is from API)
+      const kts      = props.kts?.getValue();       // knots (stored as-is from API)
       const provider = (props.provider?.getValue() ?? 'adsb').toUpperCase();
       const icao     = String(entity.id).replace('flight-', '').toUpperCase();
 
-      // alt_baro is feet — convert to km for display, also show ft
-      const altKm    = altFt != null ? (altFt * 0.3048 / 1000).toFixed(1) + ' km' : '–';
-      const altFtStr = altFt != null ? Math.round(altFt).toLocaleString() + ' ft'  : '–';
-      const spdStr   = spdKts != null ? Math.round(spdKts) + ' kts' : '–';
+      const altKm    = altFt != null ? (altFt * 0.3048 / 1000).toFixed(1) + ' km'         : '–';
+      const altFtStr = altFt != null ? Math.round(altFt).toLocaleString()  + ' ft'         : '–';
+      const spdStr   = kts   != null ? Math.round(kts)                     + ' kts'        : '–';
 
       html = `
         <div style="font-size:13px;font-weight:bold;margin-bottom:8px;letter-spacing:0.15em">
           ✈ ${callsign || icao}
         </div>
-        <div>ICAO: ${icao}</div>
-        <div>ALT:  ${altKm} · ${altFtStr}</div>
-        <div>SPD:  ${spdStr}</div>
+        <div>ICAO:&nbsp; ${icao}</div>
+        <div>ALT:&nbsp;&nbsp; ${altKm} · ${altFtStr}</div>
+        <div>SPD:&nbsp;&nbsp; ${spdStr}</div>
         <div style="margin-top:8px;opacity:0.5;font-size:9px">LIVE · ${provider}</div>
       `;
 
     } else if (type === 'satellite') {
-      const name     = props.name?.getValue() ?? entity.id;
+      const name     = props.name?.getValue()     ?? entity.id;
       const provider = (props.provider?.getValue() ?? 'celestrak').toUpperCase();
       html = `
         <div style="font-size:13px;font-weight:bold;margin-bottom:8px;letter-spacing:0.15em;color:#00aaff">
