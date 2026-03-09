@@ -6,15 +6,11 @@ const cesiumBaseUrl = 'cesiumStatic';
 
 export default defineConfig({
   define: {
-    // Tells CesiumJS where to find its static assets at runtime.
-    // During dev, Vite serves them from the root via the alias below.
-    // During build, viteStaticCopy puts them at /cesiumStatic/.
+    // Tells CesiumJS where to find its static assets at runtime
     CESIUM_BASE_URL: JSON.stringify(`/${cesiumBaseUrl}/`),
   },
 
   plugins: [
-    // Copies Cesium static assets into /dist at build time.
-    // vite-plugin-static-copy also serves them in dev via its devServer option.
     viteStaticCopy({
       targets: [
         { src: `${cesiumSource}/ThirdParty`, dest: cesiumBaseUrl },
@@ -25,7 +21,6 @@ export default defineConfig({
     }),
   ],
 
-  // Allow Vite's dev server to serve files from node_modules/cesium
   server: {
     port: 5173,
     fs: {
@@ -45,15 +40,19 @@ export default defineConfig({
     },
   },
 
-  // Prevent Vite from trying to bundle the massive CesiumJS library —
-  // let it load from its pre-built IIFE instead.
+  // DO NOT exclude cesium here — it has CommonJS sub-deps (mersenne-twister etc.)
+  // that need Vite's esbuild pre-bundler to convert them to ESM.
+  // Instead let Vite pre-bundle everything normally.
   optimizeDeps: {
-    exclude: ['cesium'],
+    include: ['cesium'],
   },
 
   build: {
+    // Increase the chunk size warning limit — CesiumJS is intentionally large
+    chunkSizeWarningLimit: 10000,
     rollupOptions: {
       output: {
+        // Keep Cesium in its own chunk
         manualChunks: {
           cesium: ['cesium'],
         },
