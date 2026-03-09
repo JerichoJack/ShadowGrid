@@ -5,9 +5,10 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "proxy": "node server/proxy.mjs",
+    "dev:all": "node -e \"const {spawn}=require('child_process');['node server/proxy.mjs','vite'].forEach(cmd=>{const[c,...a]=cmd.split(' ');const p=spawn(c,a,{stdio:'inherit',shell:true});p.on('error',console.error)})\"",
     "build": "vite build",
-    "preview": "vite preview",
-    "archive": "node server/collector.js"
+    "preview": "vite preview"
   },
   "dependencies": {
     "cesium": "^1.115.0",

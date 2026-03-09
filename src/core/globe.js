@@ -67,8 +67,36 @@ function applySceneSettings(viewer) {
   scene.backgroundColor                = Cesium.Color.BLACK;
   scene.fog.enabled                    = false;
   scene.globe.enableLighting           = false;
-  scene.globe.depthTestAgainstTerrain  = false;
+  scene.globe.depthTestAgainstTerrain  = true;
   scene.postProcessStages.fxaa.enabled = true;
+}
+
+
+// ── Labels + borders overlay ──────────────────────────────────────────────────
+// Adds a transparent country/city labels + borders layer on top of any base imagery.
+// Uses Cesium ion asset 3812 (Cesium OSM Labels) — free, no extra key needed.
+
+async function addLabelsOverlay(viewer) {
+  try {
+    const labels = await Cesium.IonImageryProvider.fromAssetId(3812);
+    viewer.imageryLayers.addImageryProvider(labels);
+    console.info('[WorldView] Labels + borders overlay added ✓');
+  } catch (err) {
+    // Fallback: Stamen Toner Lines (borders only, no key required)
+    try {
+      viewer.imageryLayers.addImageryProvider(
+        new Cesium.UrlTemplateImageryProvider({
+          url:    'https://tiles.stadiamaps.com/tiles/stamen_toner_lines/{z}/{x}/{y}.png',
+          credit: '© Stadia Maps © Stamen Design © OpenStreetMap contributors',
+          minimumLevel: 0,
+          maximumLevel: 20,
+        })
+      );
+      console.info('[WorldView] Stamen borders overlay added ✓ (ion labels unavailable)');
+    } catch (e) {
+      console.warn('[WorldView] Labels overlay unavailable:', err.message);
+    }
+  }
 }
 
 // ── Provider: Cesium ion ──────────────────────────────────────────────────────
@@ -106,6 +134,9 @@ async function initCesiumIon(containerId) {
       new Cesium.OpenStreetMapImageryProvider({ url: 'https://tile.openstreetmap.org/' })
     );
   }
+
+  // Labels + borders overlay (on top of satellite)
+  await addLabelsOverlay(viewer);
 
   // OSM 3D Buildings
   try {
@@ -196,6 +227,8 @@ async function initMapTiler(containerId) {
       tileHeight:   256,
     })
   );
+
+  await addLabelsOverlay(viewer);
 
   window.__wv_viewer = viewer;
   console.info('[WorldView] MapTiler ready ✓');
