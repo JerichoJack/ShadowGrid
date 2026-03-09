@@ -67,7 +67,7 @@ function applySceneSettings(viewer) {
   scene.backgroundColor                = Cesium.Color.BLACK;
   scene.fog.enabled                    = false;
   scene.globe.enableLighting           = false;
-  scene.globe.depthTestAgainstTerrain  = true;
+  scene.globe.depthTestAgainstTerrain  = false;
   scene.postProcessStages.fxaa.enabled = true;
 }
 

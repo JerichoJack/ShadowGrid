@@ -6,7 +6,6 @@ const cesiumBaseUrl = 'cesiumStatic';
 
 export default defineConfig({
   define: {
-    // Tells CesiumJS where to find its static assets at runtime
     CESIUM_BASE_URL: JSON.stringify(`/${cesiumBaseUrl}/`),
   },
 
@@ -23,39 +22,47 @@ export default defineConfig({
 
   server: {
     port: 5173,
-    fs: {
-      allow: ['..'],
-    },
+    fs: { allow: ['..'] },
     proxy: {
-      '/api/celestrak': {
-        target: 'https://celestrak.org',
+      // ── Flight data providers ───────────────────────────────────────────
+      '/api/airplaneslive': {
+        target:      'https://api.airplanes.live',
         changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/api\/celestrak/, ''),
+        rewrite:     path => path.replace(/^\/api\/airplaneslive/, ''),
+      },
+      '/api/adsbool': {
+        target:      'https://api.adsb.lol',
+        changeOrigin: true,
+        rewrite:     path => path.replace(/^\/api\/adsbool/, ''),
+      },
+      '/api/opensky': {
+        target:      'https://opensky-network.org',
+        changeOrigin: true,
+        rewrite:     path => path.replace(/^\/api\/opensky/, ''),
+      },
+      // ── Satellite TLE providers ─────────────────────────────────────────
+      '/api/celestrak': {
+        target:      'https://celestrak.org',
+        changeOrigin: true,
+        rewrite:     path => path.replace(/^\/api\/celestrak/, ''),
       },
       '/api/spacetrack': {
-        target: 'https://www.space-track.org',
+        target:      'https://www.space-track.org',
         changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/api\/spacetrack/, ''),
+        rewrite:     path => path.replace(/^\/api\/spacetrack/, ''),
       },
     },
   },
 
-  // DO NOT exclude cesium here — it has CommonJS sub-deps (mersenne-twister etc.)
-  // that need Vite's esbuild pre-bundler to convert them to ESM.
-  // Instead let Vite pre-bundle everything normally.
   optimizeDeps: {
     include: ['cesium'],
   },
 
   build: {
-    // Increase the chunk size warning limit — CesiumJS is intentionally large
     chunkSizeWarningLimit: 10000,
     rollupOptions: {
       output: {
-        // Keep Cesium in its own chunk
-        manualChunks: {
-          cesium: ['cesium'],
-        },
+        manualChunks: { cesium: ['cesium'] },
       },
     },
   },

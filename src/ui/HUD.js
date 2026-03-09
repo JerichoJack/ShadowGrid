@@ -16,7 +16,6 @@ export function initHUD(viewer) {
 function drawReticle(viewer) {
   const canvas = viewer.canvas;
 
-  // Overlay a transparent canvas on top of Cesium
   const overlay   = document.createElement('canvas');
   overlay.style.cssText = `
     position: fixed; inset: 0;
@@ -59,8 +58,8 @@ function drawReticle(viewer) {
     // Corner ticks at cardinal angles
     const ticks = [0, Math.PI/2, Math.PI, 3*Math.PI/2];
     ticks.forEach(angle => {
-      const x = cx + (r - 6) * Math.cos(angle);
-      const y = cy + (r - 6) * Math.sin(angle);
+      const x  = cx + (r - 6) * Math.cos(angle);
+      const y  = cy + (r - 6) * Math.sin(angle);
       const x2 = cx + (r + 4) * Math.cos(angle);
       const y2 = cy + (r + 4) * Math.sin(angle);
       ctx.beginPath(); ctx.moveTo(x,y); ctx.lineTo(x2,y2); ctx.stroke();
@@ -76,7 +75,6 @@ function drawReticle(viewer) {
 function initEntityPicker(viewer) {
   const handler = new Cesium.ScreenSpaceEventHandler(viewer.canvas);
 
-  // Create info panel element
   const panel = document.createElement('div');
   panel.id    = 'info-panel';
   panel.style.cssText = `
@@ -98,7 +96,6 @@ function initEntityPicker(viewer) {
   `;
   document.body.appendChild(panel);
 
-  // Close button
   const close = document.createElement('div');
   close.textContent = '✕';
   close.style.cssText = `
@@ -125,25 +122,35 @@ function initEntityPicker(viewer) {
 
     if (type === 'flight') {
       const callsign = props.callsign?.getValue() ?? '–';
-      const alt      = props.altitude?.getValue();
-      const spd      = props.velocity?.getValue();
+      const altFt    = props.altitude?.getValue();   // stored in feet
+      const spdKts   = props.velocity?.getValue();   // stored in knots
+      const provider = (props.provider?.getValue() ?? 'adsb').toUpperCase();
+      const icao     = String(entity.id).replace('flight-', '').toUpperCase();
+
+      // alt_baro is feet — convert to km for display, also show ft
+      const altKm    = altFt != null ? (altFt * 0.3048 / 1000).toFixed(1) + ' km' : '–';
+      const altFtStr = altFt != null ? Math.round(altFt).toLocaleString() + ' ft'  : '–';
+      const spdStr   = spdKts != null ? Math.round(spdKts) + ' kts' : '–';
+
       html = `
         <div style="font-size:13px;font-weight:bold;margin-bottom:8px;letter-spacing:0.15em">
-          ✈ ${callsign}
+          ✈ ${callsign || icao}
         </div>
-        <div>ICAO: ${entity.id}</div>
-        <div>ALT: ${alt ? (alt/1000).toFixed(1) + ' km' : '–'}</div>
-        <div>SPD: ${spd ? Math.round(spd * 1.944) + ' kts' : '–'}</div>
-        <div style="margin-top:8px;opacity:0.5;font-size:9px">LIVE · OPENSKY</div>
+        <div>ICAO: ${icao}</div>
+        <div>ALT:  ${altKm} · ${altFtStr}</div>
+        <div>SPD:  ${spdStr}</div>
+        <div style="margin-top:8px;opacity:0.5;font-size:9px">LIVE · ${provider}</div>
       `;
+
     } else if (type === 'satellite') {
-      const name = props.name?.getValue() ?? entity.id;
+      const name     = props.name?.getValue() ?? entity.id;
+      const provider = (props.provider?.getValue() ?? 'celestrak').toUpperCase();
       html = `
         <div style="font-size:13px;font-weight:bold;margin-bottom:8px;letter-spacing:0.15em;color:#00aaff">
           ◈ ${name}
         </div>
         <div style="opacity:0.7">ORBITAL TRACKING ACTIVE</div>
-        <div style="margin-top:8px;opacity:0.5;font-size:9px">LIVE · CELESTRAK TLE</div>
+        <div style="margin-top:8px;opacity:0.5;font-size:9px">LIVE · ${provider} TLE</div>
       `;
     }
 
