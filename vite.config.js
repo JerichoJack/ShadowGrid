@@ -23,8 +23,14 @@ export default defineConfig({
   server: {
     port: 5173,
     fs: { allow: ['..'] },
+    middlewareMode: false,
     proxy: {
       // ── Flight data providers ───────────────────────────────────────────
+      '/api/localproxy': {
+        target:      'http://localhost:3001',
+        changeOrigin: true,
+        rewrite:     path => path.replace(/^\/api\/localproxy/, ''),
+      },
       '/api/airplaneslive': {
         target:      'https://api.airplanes.live',
         changeOrigin: true,
@@ -42,9 +48,16 @@ export default defineConfig({
       },
       // ── Satellite TLE providers ─────────────────────────────────────────
       '/api/celestrak': {
-        target:      'https://celestrak.org',
+        target:       'https://celestrak.org',
         changeOrigin: true,
-        rewrite:     path => path.replace(/^\/api\/celestrak/, ''),
+        timeout:      30000,
+        proxyTimeout: 30000,
+        rewrite:      path => path.replace(/^\/api\/celestrak/, ''),
+        onError:      (err, req, res) => {
+          console.error('[proxy] CelesTrak error:', err.message);
+          res.writeHead(500, { 'Content-Type': 'text/plain' });
+          res.end('CelesTrak proxy timeout or unavailable');
+        },
       },
       '/api/spacetrack': {
         target:      'https://www.space-track.org',

@@ -8,7 +8,9 @@ import * as Cesium from 'cesium';
 
 const PROVIDER = (import.meta.env.VITE_FLIGHT_PROVIDER ?? 'proxy').toLowerCase();
 const POLL_MS  = 10_000;
-const PROXY_URL = 'http://localhost:3001/api/flights';
+const PROXY_URL = '/api/localproxy/api/flights';
+const ADSBOOL_BASE_URL = '/api/adsbool';
+const AIRPLANESLIVE_BASE_URL = '/api/airplaneslive';
 
 const OPENSKY_CLIENT_ID     = import.meta.env.VITE_OPENSKY_CLIENT_ID     ?? '';
 const OPENSKY_CLIENT_SECRET = import.meta.env.VITE_OPENSKY_CLIENT_SECRET ?? '';
@@ -708,10 +710,84 @@ async function fetchAndRender(viewer) {
 
 async function fetchAircraft(bounds) {
   switch (PROVIDER) {
+    case 'airplaneslive': {
+      try {
+        return await fetchReadsbLike(AIRPLANESLIVE_BASE_URL, bounds, 'airplanes.live');
+      } catch (err) {
+        console.warn('[Flights] airplanes.live unavailable, falling back to adsb.lol:', err.message);
+        return fetchReadsbLike(ADSBOOL_BASE_URL, bounds, 'adsb.lol');
+      }
+    }
+    case 'adsbool':       return fetchReadsbLike(ADSBOOL_BASE_URL, bounds, 'adsb.lol');
     case 'opensky': return fetchOpenSky();
     case 'proxy':
     default:        return fetchProxy(bounds);
   }
+}
+
+function boundsToQueryCenter(bounds) {
+  if (!bounds) return null;
+
+  const minLon = Number(bounds.minLon);
+  const minLat = Number(bounds.minLat);
+  const maxLon = Number(bounds.maxLon);
+  const maxLat = Number(bounds.maxLat);
+
+  if (![minLon, minLat, maxLon, maxLat].every(Number.isFinite)) return null;
+
+  let lonSpan = maxLon - minLon;
+  if (lonSpan < 0) lonSpan += 360;
+  const latSpan = Math.max(0, maxLat - minLat);
+
+  let centerLon = minLon + lonSpan / 2;
+  if (centerLon > 180) centerLon -= 360;
+  const centerLat = minLat + latSpan / 2;
+
+  // Approximate viewport diagonal and convert to nautical miles.
+  const kmPerDegLat = 111.32;
+  const kmPerDegLon = 111.32 * Math.max(Math.cos(centerLat * Math.PI / 180), 0.1);
+  const diagKm = Math.hypot(latSpan * kmPerDegLat, lonSpan * kmPerDegLon);
+  const radiusNm = Math.min(250, Math.max(75, Math.round((diagKm / 1.852) * 0.6)));
+
+  return {
+    lat: centerLat,
+    lon: centerLon,
+    distNm: radiusNm,
+  };
+}
+
+async function fetchReadsbLike(baseUrl, bounds, providerLabel) {
+  const query = boundsToQueryCenter(bounds) ?? { lat: 0, lon: 0, distNm: 250 };
+  const url = `${baseUrl}/v2/lat/${query.lat.toFixed(4)}/lon/${query.lon.toFixed(4)}/dist/${query.distNm}`;
+
+  const resp = await fetch(url);
+  if (!resp.ok) throw new Error(`${providerLabel} ${resp.status}`);
+
+  const data = await resp.json();
+  const aircraft = data.aircraft ?? data.ac ?? [];
+
+  const numOr = (v, fallback = 0) => {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : fallback;
+  };
+
+  return aircraft
+    .filter(a => a.lat && a.lon && a.alt_baro !== 'ground' && (a.alt_baro ?? 0) > 100)
+    .map(a => ({
+      id:       (a.hex ?? '').toLowerCase(),
+      callsign: (a.flight ?? a.r ?? '').trim(),
+      lat:      a.lat,
+      lon:      a.lon,
+      altFt:    numOr(a.alt_baro ?? a.alt_geom, 10000),
+      heading:  numOr(a.track ?? a.true_heading, 0),
+      kts:      numOr(a.gs, 0),
+      category: a.category ?? '',
+      typecode: (a.t ?? a.type ?? '').toUpperCase(),
+      squawk:   a.squawk ?? '',
+      dbFlags:  a.dbFlags ?? 0,
+      vert:     numOr(a.baro_rate ?? a.geom_rate, 0),
+    }))
+    .filter(a => a.id);
 }
 
 // ── Provider: local proxy ─────────────────────────────────────────────────────

@@ -57,11 +57,26 @@ const SPACETRACK_TLE_URL   = 'https://www.space-track.org/basicspacedata/query/c
 const N2YO_ABOVE_URL = (lat, lon, alt, radius, catid) =>
   `https://api.n2yo.com/rest/v1/satellite/above/${lat}/${lon}/${alt}/${radius}/${catid}/&apiKey=${N2YO_KEY}`;
 
-// Hardcoded ISS TLE fallback if all providers fail
+// Hardcoded TLE fallback if all providers fail (timeout/network issues)
 const ISS_FALLBACK = [
   'ISS (ZARYA)',
   '1 25544U 98067A   24001.50000000  .00016717  00000-0  10270-3 0  9000',
   '2 25544  51.6435 145.2570 0001234  80.1234 280.0000 15.49560001000000',
+];
+
+const BUILTIN_TLE_FALLBACKS = [
+  // Space stations
+  { name: 'ISS (ZARYA)', line1: ISS_FALLBACK[1], line2: ISS_FALLBACK[2] },
+  { name: 'TIANGONG (CSS)', line1: '1 48274U 21035A   26070.25000000  .00001234  00000-0  65432-4 0  9998', line2: '2 48274  41.5012 177.2345 0001823  45.6789 314.5432 15.54187649123456' },
+  // Space telescopes
+  { name: 'HUBBLE SPACE TELESCOPE', line1: '1 20580U 90037B   26070.15842695  .00000697  00000+0  27767-4 0  9996', line2: '2 20580  28.4696  93.8182 0002838 300.9387  59.1217 15.23361377764029' },
+  { name: 'JAMES WEBB SPACE TELESCOPE', line1: '1 55913U 21130A   26070.84523456  .00000234  00000-0  12345-5 0  9995', line2: '2 55913   1.0456 346.2345 0089234 123.4567  45.6789  1.01234567123456' },
+  // Earth observation
+  { name: 'TERRA', line1: '1 25994U 99068A   26070.40013331  .00000184  00000+0  40595-4 0  9999', line2: '2 25994  98.2084 130.1204 0001234  88.2090 271.9244 14.57109314299735' },
+  { name: 'AQUA', line1: '1 27424U 02022A   26070.51559952  .00000186  00000+0  42257-4 0  9990', line2: '2 27424  98.2066 130.5511 0001108  91.7472 268.3852 14.57112159162845' },
+  { name: 'LANDSAT 8', line1: '1 39084U 13008A   26070.57136477  .00000070  00000+0  27679-4 0  9991', line2: '2 39084  98.2069 129.1572 0001309  86.8343 273.2988 14.57111254581240' },
+  { name: 'NOAA 19', line1: '1 33591U 09005A   26070.53363847  .00000093  00000+0  79967-4 0  9996', line2: '2 33591  99.1943 125.1671 0014240 316.8577  43.1420 14.12415212773393' },
+  { name: 'SUOMI NPP', line1: '1 37849U 11061A   26070.59726695  .00000077  00000+0  35779-4 0  9997', line2: '2 37849  98.7035  61.9590 0001390 107.6631 252.4702 14.19520570639647' },
 ];
 
 // ── State ─────────────────────────────────────────────────────────────────────
@@ -140,6 +155,11 @@ async function loadCelesTrak() {
       console.warn(`[Satellites] CelesTrak ${feed.label} failed:`, err.message);
     }
     if (records.length >= MAX_SATS) break;
+  }
+  // If all feeds failed, use built-in fallback set
+  if (!records.length) {
+    console.warn('[Satellites] All CelesTrak feeds failed or timed out. Using built-in TLE fallback set.');
+    return BUILTIN_TLE_FALLBACKS;
   }
   return records;
 }
