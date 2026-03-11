@@ -96,14 +96,14 @@ export function followEntity(viewer, entity, opts = {}) {
     viewer.trackedEntity = entity;
   }
 
-  window.dispatchEvent(new CustomEvent('worldview:follow', {
+  window.dispatchEvent(new CustomEvent('shadowgrid:follow', {
     detail: { label: _label, type: _type, entity }
   }));
 }
 
 /**
  * Stop following.
- * @param {boolean} [silent] suppress the 'worldview:unfollow' event
+ * @param {boolean} [silent] suppress the 'shadowgrid:unfollow' event
  * @param {boolean} [restorePreviousView] when true, fly back to pre-follow camera view
  */
 export function stopFollow(silent = false, restorePreviousView = false) {
@@ -158,7 +158,7 @@ function _cleanup(silent, restorePreviousView = false) {
 
   if (!silent && wasActive && prevLabel) {
     console.log(`[Follow] ✕ ${prevLabel}`);
-    window.dispatchEvent(new CustomEvent('worldview:unfollow', {
+    window.dispatchEvent(new CustomEvent('shadowgrid:unfollow', {
       detail: { label: prevLabel, type: prevType }
     }));
   }

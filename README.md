@@ -1,4 +1,4 @@
-# 🌍 WorldView
+# 🌍 ShadowGrid
 
 A browser-based geospatial intelligence platform that lets you observe any place on Earth through the lens of a surveillance analyst — night vision, FLIR thermal, CRT scan lines, live air traffic with detailed aircraft silhouettes, and real satellite orbits draped directly onto a photorealistic 3D globe.
 
@@ -152,8 +152,8 @@ Rate limits: 4,000 credits/day authenticated; anonymous access is heavily thrott
 ### Installation
 
 ```bash
-git clone https://github.com/JerichoJack/WorldView.git
-cd WorldView
+git clone https://github.com/JerichoJack/ShadowGrid.git
+cd ShadowGrid
 npm install
 ```
 
@@ -207,7 +207,7 @@ npm run proxy
 ## 📁 Project Structure
 
 ```
-WorldView/
+ShadowGrid/
 ├── server/
 │   ├── proxy.mjs             # Node.js flight data proxy (viewport-aware hub fetching)
 │   └── collectors/
@@ -284,9 +284,9 @@ Classification (commercial / military / other) uses:
 
 ## 💡 Inspiration
 
-This project is a direct replication and exploration of [Bilawal Sidhu's WorldView](https://www.spatialintelligence.ai/p/i-built-a-spy-satellite-simulator) — a "spy satellite simulator in a browser" that fuses open-source intelligence feeds onto a photorealistic 3D globe. Bilawal's original repo has not been made public; this is my attempt to reverse-engineer and build the same system from the ground up using the same publicly documented tools and data sources.
+This project is a direct replication and exploration of [Bilawal Sidhu's spy satellite simulator concept](https://www.spatialintelligence.ai/p/i-built-a-spy-satellite-simulator) — a browser-based system that fuses open-source intelligence feeds onto a photorealistic 3D globe. Bilawal's original repo has not been made public; this is my attempt to reverse-engineer and build the same system from the ground up using the same publicly documented tools and data sources.
 
-The core thesis: the data was never the moat. Surveillance-grade views of the world are built entirely from open, public feeds. WorldView makes that visible.
+The core thesis: the data was never the moat. Surveillance-grade views of the world are built entirely from open, public feeds. ShadowGrid makes that visible.
 
 ---
 
@@ -298,7 +298,7 @@ MIT License — see [LICENSE](LICENSE) for details.
 
 ## 🙏 Credits
 
-- [Bilawal Sidhu](https://www.spatialintelligence.ai) — original WorldView concept and thesis
+- [Bilawal Sidhu](https://www.spatialintelligence.ai) — original spy satellite simulator concept and thesis
 - [CesiumJS](https://cesium.com) — open-source 3D geospatial engine
 - [Google Maps Platform](https://developers.google.com/maps) — Photorealistic 3D Tiles
 - [Cesium ion](https://ion.cesium.com) — hosted terrain, imagery, and OSM buildings

@@ -13,7 +13,7 @@ import { setFollowMode, setFlightGlow, hasAssetModel } from '../layers/flights.j
 import { CITIES, flyTo } from '../core/camera.js';
 
 function combineSubsystemStatus() {
-  const status = window.__worldviewSubsystemStatus ?? {};
+  const status = window.__shadowgridSubsystemStatus ?? {};
   const flights    = status.flights;
   const satellites = status.satellites;
 
@@ -71,7 +71,7 @@ export function initHUD(viewer) {
   initEntityPicker(viewer);
 
   // Global system-status bus so any layer can update the bottom status panel.
-  window.addEventListener('worldview:system-status', (ev) => {
+  window.addEventListener('shadowgrid:system-status', (ev) => {
     const detail = ev?.detail ?? {};
     if (typeof detail.msg !== 'string' || !detail.msg.trim()) return;
 
@@ -88,14 +88,14 @@ export function initHUD(viewer) {
   if (combined) {
     applyHUDStatus(combined);
   } else {
-    const cached = window.__worldviewSystemStatus;
+    const cached = window.__shadowgridSystemStatus;
     if (cached?.msg) {
       setHUDStatus(cached.msg, cached.level ?? 'ok');
     }
   }
 
   // When follow is cancelled externally (user pans), update the panel button
-  window.addEventListener('worldview:unfollow', () => {
+  window.addEventListener('shadowgrid:unfollow', () => {
     const btn = document.getElementById('follow-btn');
     if (btn) setFollowBtnState(btn, false);
   });
@@ -233,7 +233,7 @@ function drawReticle(viewer) {
       gap: 20px;
       backdrop-filter: blur(10px);
     ">
-      <span style="color:rgba(0,255,136,0.55);font-size:9px;letter-spacing:0.2em">WORLDVIEW / UNCLASSIFIED</span>
+      <span style="color:rgba(0,255,136,0.55);font-size:9px;letter-spacing:0.2em">SHADOWGRID / UNCLASSIFIED</span>
       <span style="color:rgba(255,255,255,0.15)">|</span>
       <span id="hud-utc" style="color:rgba(0,255,136,0.8);letter-spacing:0.08em">–</span>
       <span style="color:rgba(255,255,255,0.15)">|</span>

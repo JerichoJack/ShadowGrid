@@ -28,7 +28,7 @@ export async function initGlobe(containerId) {
   if (CESIUM_TOKEN) {
     Cesium.Ion.defaultAccessToken = CESIUM_TOKEN;
   } else {
-    console.warn('[WorldView] No VITE_CESIUM_ION_TOKEN set. Get a free token at https://ion.cesium.com');
+    console.warn('[ShadowGrid] No VITE_CESIUM_ION_TOKEN set. Get a free token at https://ion.cesium.com');
   }
 
   switch (PROVIDER) {
@@ -127,16 +127,16 @@ async function addLabelsOverlay(viewer) {
         maximumLevel: 20,
       })
     );
-    console.info('[WorldView] Labels + borders overlay added ✓');
+    console.info('[ShadowGrid] Labels + borders overlay added ✓');
   } catch (err) {
-    console.warn('[WorldView] Labels overlay unavailable:', err.message);
+    console.warn('[ShadowGrid] Labels overlay unavailable:', err.message);
   }
 }
 
 // ── Provider: Cesium ion ──────────────────────────────────────────────────────
 
 async function initCesiumIon(containerId) {
-  console.info('[WorldView] Provider: Cesium ion');
+  console.info('[ShadowGrid] Provider: Cesium ion');
 
   // Resolve terrain BEFORE constructing Viewer — avoids the async-in-constructor hang
   let terrainProvider;
@@ -146,7 +146,7 @@ async function initCesiumIon(containerId) {
       requestVertexNormals: true,
     });
   } catch (err) {
-    console.warn('[WorldView] World Terrain failed, using ellipsoid:', err.message);
+    console.warn('[ShadowGrid] World Terrain failed, using ellipsoid:', err.message);
     terrainProvider = new Cesium.EllipsoidTerrainProvider();
   }
 
@@ -162,7 +162,7 @@ async function initCesiumIon(containerId) {
     const bing = await Cesium.IonImageryProvider.fromAssetId(2);
     viewer.imageryLayers.addImageryProvider(bing);
   } catch (err) {
-    console.warn('[WorldView] Bing imagery unavailable:', err.message);
+    console.warn('[ShadowGrid] Bing imagery unavailable:', err.message);
     // Fallback to OpenStreetMap so the globe isn't blank
     viewer.imageryLayers.addImageryProvider(
       new Cesium.OpenStreetMapImageryProvider({ url: 'https://tile.openstreetmap.org/' })
@@ -177,11 +177,11 @@ async function initCesiumIon(containerId) {
     const osm = await Cesium.createOsmBuildingsAsync();
     viewer.scene.primitives.add(osm);
   } catch (err) {
-    console.warn('[WorldView] OSM Buildings unavailable:', err.message);
+    console.warn('[ShadowGrid] OSM Buildings unavailable:', err.message);
   }
 
   window.__wv_viewer = viewer;
-  console.info('[WorldView] Cesium ion ready ✓');
+  console.info('[ShadowGrid] Cesium ion ready ✓');
   return viewer;
 }
 
@@ -189,11 +189,11 @@ async function initCesiumIon(containerId) {
 
 async function initGoogle(containerId) {
   if (!GOOGLE_KEY) {
-    console.warn('[WorldView] No VITE_GOOGLE_MAPS_API_KEY — falling back to Cesium ion.');
+    console.warn('[ShadowGrid] No VITE_GOOGLE_MAPS_API_KEY — falling back to Cesium ion.');
     return initCesiumIon(containerId);
   }
 
-  console.info('[WorldView] Provider: Google Photorealistic 3D Tiles');
+  console.info('[ShadowGrid] Provider: Google Photorealistic 3D Tiles');
 
   const viewer = new Cesium.Viewer(containerId, {
     ...baseOptions(),
@@ -211,9 +211,9 @@ async function initGoogle(containerId) {
     });
     viewer.scene.primitives.add(tileset);
     await viewer.zoomTo(tileset);
-    console.info('[WorldView] Google 3D Tiles ready ✓');
+    console.info('[ShadowGrid] Google 3D Tiles ready ✓');
   } catch (err) {
-    console.error('[WorldView] Google 3D Tiles failed — falling back to Cesium ion:', err.message);
+    console.error('[ShadowGrid] Google 3D Tiles failed — falling back to Cesium ion:', err.message);
     viewer.scene.globe.show = true;
     return initCesiumIon(containerId);
   }
@@ -226,11 +226,11 @@ async function initGoogle(containerId) {
 
 async function initMapTiler(containerId) {
   if (!MAPTILER_KEY) {
-    console.warn('[WorldView] No VITE_MAPTILER_API_KEY — falling back to Cesium ion.');
+    console.warn('[ShadowGrid] No VITE_MAPTILER_API_KEY — falling back to Cesium ion.');
     return initCesiumIon(containerId);
   }
 
-  console.info('[WorldView] Provider: MapTiler');
+  console.info('[ShadowGrid] Provider: MapTiler');
 
   // Resolve terrain before Viewer construction
   let terrainProvider;
@@ -239,7 +239,7 @@ async function initMapTiler(containerId) {
       requestVertexNormals: true,
     });
   } catch (err) {
-    console.warn('[WorldView] MapTiler terrain failed — falling back to Cesium ion:', err.message);
+    console.warn('[ShadowGrid] MapTiler terrain failed — falling back to Cesium ion:', err.message);
     return initCesiumIon(containerId);
   }
 
@@ -265,6 +265,6 @@ async function initMapTiler(containerId) {
   await addLabelsOverlay(viewer);
 
   window.__wv_viewer = viewer;
-  console.info('[WorldView] MapTiler ready ✓');
+  console.info('[ShadowGrid] MapTiler ready ✓');
   return viewer;
 }

@@ -114,9 +114,9 @@ function applyShaderMode(viewer, mode) {
   body.classList.remove('mode-nvg', 'mode-flir', 'mode-crt', 'mode-anime');
 
   // Clear any existing post-process stages we added
-  if (scene._worldviewStage) {
-    scene.postProcessStages.remove(scene._worldviewStage);
-    scene._worldviewStage = null;
+  if (scene._shadowgridStage) {
+    scene.postProcessStages.remove(scene._shadowgridStage);
+    scene._shadowgridStage = null;
   }
 
   switch (mode) {
@@ -126,28 +126,28 @@ function applyShaderMode(viewer, mode) {
 
     case 'nvg':
       body.classList.add('mode-nvg');
-      scene._worldviewStage = scene.postProcessStages.add(
+      scene._shadowgridStage = scene.postProcessStages.add(
         buildNVGStage()
       );
       break;
 
     case 'flir':
       body.classList.add('mode-flir');
-      scene._worldviewStage = scene.postProcessStages.add(
+      scene._shadowgridStage = scene.postProcessStages.add(
         buildFLIRStage()
       );
       break;
 
     case 'crt':
       body.classList.add('mode-crt');
-      scene._worldviewStage = scene.postProcessStages.add(
+      scene._shadowgridStage = scene.postProcessStages.add(
         buildCRTStage()
       );
       break;
 
     case 'anime':
       body.classList.add('mode-anime');
-      scene._worldviewStage = scene.postProcessStages.add(
+      scene._shadowgridStage = scene.postProcessStages.add(
         buildAnimeStage()
       );
       break;

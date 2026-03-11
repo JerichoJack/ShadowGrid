@@ -288,7 +288,7 @@ async function fetchSource(s, idx, total) {
   const label = `[${String(idx+1).padStart(3)}/${total}] ${s.name}`;
   try {
     const res = await fetch(url, {
-      headers: { 'User-Agent': 'WorldView-Collector/1.0' },
+      headers: { 'User-Agent': 'ShadowGrid-Collector/1.0' },
       signal: AbortSignal.timeout(30_000),
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -319,7 +319,7 @@ async function pool(tasks, concurrency) {
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
 async function main() {
-  console.log(`\n WorldView Camera Collector`);
+  console.log(`\n ShadowGrid Camera Collector`);
   console.log(`  Sources     : ${sources.length}`);
   console.log(`  Concurrency : ${CONCURRENCY}`);
   console.log(`  Output      : ${OUT_DIR}\n`);

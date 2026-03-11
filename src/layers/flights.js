@@ -713,13 +713,13 @@ function publishSystemStatus(msg, level = 'ok', key = `${level}:${msg}`) {
   if (typeof window === 'undefined') return;
 
   const ts = Date.now();
-  window.__worldviewSystemStatus = { msg, level, key, source: 'flights', ts };
-  window.__worldviewSubsystemStatus = {
-    ...(window.__worldviewSubsystemStatus ?? {}),
+  window.__shadowgridSystemStatus = { msg, level, key, source: 'flights', ts };
+  window.__shadowgridSubsystemStatus = {
+    ...(window.__shadowgridSubsystemStatus ?? {}),
     flights: { msg, level, key, ts },
   };
 
-  window.dispatchEvent(new CustomEvent('worldview:system-status', {
+  window.dispatchEvent(new CustomEvent('shadowgrid:system-status', {
     detail: { msg, level, source: 'flights', key, ts },
   }));
 }
@@ -760,12 +760,12 @@ export async function initFlights(viewer) {
   await fetchAndRender(viewer);
   setInterval(() => { if (enabled) fetchAndRender(viewer); }, POLL_MS);
 
-  window.addEventListener('worldview:follow', () => {
+  window.addEventListener('shadowgrid:follow', () => {
     hideAllFlatIcons = true;
     applyFlatIconVisibility();
   });
 
-  window.addEventListener('worldview:unfollow', () => {
+  window.addEventListener('shadowgrid:unfollow', () => {
     hideAllFlatIcons = false;
     applyFlatIconVisibility();
   });

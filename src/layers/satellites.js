@@ -166,13 +166,13 @@ function publishSystemStatus(msg, level = 'ok', key = `${level}:${msg}`) {
   if (typeof window === 'undefined') return;
 
   const ts = Date.now();
-  window.__worldviewSystemStatus = { msg, level, key, source: 'satellites', ts };
-  window.__worldviewSubsystemStatus = {
-    ...(window.__worldviewSubsystemStatus ?? {}),
+  window.__shadowgridSystemStatus = { msg, level, key, source: 'satellites', ts };
+  window.__shadowgridSubsystemStatus = {
+    ...(window.__shadowgridSubsystemStatus ?? {}),
     satellites: { msg, level, key, ts },
   };
 
-  window.dispatchEvent(new CustomEvent('worldview:system-status', {
+  window.dispatchEvent(new CustomEvent('shadowgrid:system-status', {
     detail: { msg, level, source: 'satellites', key, ts },
   }));
 }

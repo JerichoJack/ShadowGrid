@@ -1,5 +1,5 @@
 /**
- * WorldView — main entry point
+ * ShadowGrid — main entry point
  * Boots the globe, then lazily initialises each layer.
  */
 
@@ -93,7 +93,7 @@ async function boot() {
 }
 
 boot().catch(err => {
-  console.error('[WorldView] Boot failed:', err);
+  console.error('[ShadowGrid] Boot failed:', err);
   document.getElementById('load-status').textContent = 'Error: ' + err.message;
   document.getElementById('load-bar').style.background = '#ff3333';
 });
