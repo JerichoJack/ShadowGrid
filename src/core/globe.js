@@ -109,24 +109,27 @@ function applySceneSettings(viewer) {
 
 async function addLabelsOverlay(viewer) {
   try {
-    const labels = await Cesium.IonImageryProvider.fromAssetId(3812);
-    viewer.imageryLayers.addImageryProvider(labels);
+    // Use public Stamen Toner overlays via Stadia instead of ion asset 3812,
+    // which now returns 404 in some accounts/regions.
+    viewer.imageryLayers.addImageryProvider(
+      new Cesium.UrlTemplateImageryProvider({
+        url:    'https://tiles.stadiamaps.com/tiles/stamen_toner_lines/{z}/{x}/{y}.png',
+        credit: '© Stadia Maps © Stamen Design © OpenStreetMap contributors',
+        minimumLevel: 0,
+        maximumLevel: 20,
+      })
+    );
+    viewer.imageryLayers.addImageryProvider(
+      new Cesium.UrlTemplateImageryProvider({
+        url:    'https://tiles.stadiamaps.com/tiles/stamen_toner_labels/{z}/{x}/{y}.png',
+        credit: '© Stadia Maps © Stamen Design © OpenStreetMap contributors',
+        minimumLevel: 0,
+        maximumLevel: 20,
+      })
+    );
     console.info('[WorldView] Labels + borders overlay added ✓');
   } catch (err) {
-    // Fallback: Stamen Toner Lines (borders only, no key required)
-    try {
-      viewer.imageryLayers.addImageryProvider(
-        new Cesium.UrlTemplateImageryProvider({
-          url:    'https://tiles.stadiamaps.com/tiles/stamen_toner_lines/{z}/{x}/{y}.png',
-          credit: '© Stadia Maps © Stamen Design © OpenStreetMap contributors',
-          minimumLevel: 0,
-          maximumLevel: 20,
-        })
-      );
-      console.info('[WorldView] Stamen borders overlay added ✓ (ion labels unavailable)');
-    } catch (e) {
-      console.warn('[WorldView] Labels overlay unavailable:', err.message);
-    }
+    console.warn('[WorldView] Labels overlay unavailable:', err.message);
   }
 }
 

@@ -6,3 +6,4 @@ dist/
 *.msi
 package-lock.json
 opensky_api_credentials.json
+*.zip

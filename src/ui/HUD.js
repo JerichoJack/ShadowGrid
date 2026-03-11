@@ -9,11 +9,90 @@
 
 import * as Cesium from 'cesium';
 import { followEntity, stopFollow, isFollowing, followingLabel } from '../core/follow.js';
-import { setFollowMode } from '../layers/flights.js';
+import { setFollowMode, setFlightGlow, hasAssetModel } from '../layers/flights.js';
+import { CITIES, flyTo } from '../core/camera.js';
+
+function combineSubsystemStatus() {
+  const status = window.__worldviewSubsystemStatus ?? {};
+  const flights    = status.flights;
+  const satellites = status.satellites;
+
+  const reported = [flights, satellites].filter(Boolean);
+  if (!reported.length) return null;
+
+  const bothReported = !!(flights && satellites);
+  const allOk    = reported.every(s => s.level === 'ok');
+  const allError = reported.every(s => s.level === 'error');
+
+  if (bothReported && allOk) {
+    return { parts: [{ text: '● NOMINAL · ALL FEEDS ACTIVE', level: 'ok' }], level: 'ok' };
+  }
+
+  if (bothReported && allError) {
+    return { parts: [{ text: '✕ OFFLINE · ALL FEEDS DOWN', level: 'error' }], level: 'error' };
+  }
+
+  // Single subsystem reported and it is ok — show plainly until the other reports
+  if (!bothReported && allOk) {
+    return { parts: [{ text: reported[0].msg, level: 'ok' }], level: 'ok' };
+  }
+
+  // DEGRADED — mixed state, render each part in its own colour
+  const parts = [{ text: '⚠ DEGRADED', level: 'warn' }];
+  // Error/warn subsystems first
+  for (const s of reported) {
+    if (s.level !== 'ok') parts.push({ text: s.msg, level: s.level });
+  }
+  // Ok subsystems after
+  for (const s of reported) {
+    if (s.level === 'ok') parts.push({ text: s.msg, level: 'ok' });
+  }
+  return { parts, level: 'warn' };
+}
+
+const _hudColours = { ok: 'rgba(0,255,136,0.7)', warn: '#ffaa00', error: '#ff4444' };
+
+function applyHUDStatus(combined) {
+  const el = document.getElementById('hud-status-msg');
+  if (!el || !combined?.parts?.length) return;
+  if (combined.parts.length === 1) {
+    el.style.color = _hudColours[combined.parts[0].level] ?? _hudColours.ok;
+    el.textContent = combined.parts[0].text;
+  } else {
+    el.style.color = '';
+    el.innerHTML = combined.parts
+      .map(p => `<span style="color:${_hudColours[p.level] ?? _hudColours.ok}">${p.text}</span>`)
+      .join('<span style="color:rgba(255,255,255,0.2)"> · </span>');
+  }
+}
 
 export function initHUD(viewer) {
   drawReticle(viewer);
   initEntityPicker(viewer);
+
+  // Global system-status bus so any layer can update the bottom status panel.
+  window.addEventListener('worldview:system-status', (ev) => {
+    const detail = ev?.detail ?? {};
+    if (typeof detail.msg !== 'string' || !detail.msg.trim()) return;
+
+    const combined = combineSubsystemStatus();
+    if (combined) {
+      applyHUDStatus(combined);
+      return;
+    }
+    setHUDStatus(detail.msg, detail.level ?? 'ok');
+  });
+
+  // If feeds emitted status during boot before HUD mounted, apply latest now.
+  const combined = combineSubsystemStatus();
+  if (combined) {
+    applyHUDStatus(combined);
+  } else {
+    const cached = window.__worldviewSystemStatus;
+    if (cached?.msg) {
+      setHUDStatus(cached.msg, cached.level ?? 'ok');
+    }
+  }
 
   // When follow is cancelled externally (user pans), update the panel button
   window.addEventListener('worldview:unfollow', () => {
@@ -22,45 +101,475 @@ export function initHUD(viewer) {
   });
 }
 
-// ── Targeting reticle ─────────────────────────────────────────────────────────
+/**
+ * Update the bottom-centre status panel counts.
+ * Call this from flights.js / satellites.js whenever your entity lists change.
+ *
+ * @param {{ aircraft?: number, satellites?: number, objects?: number }} counts
+ */
+export function updateHUDCounts({ aircraft, satellites, objects } = {}) {
+  if (aircraft   != null) { const el = document.getElementById('hud-count-aircraft');   if (el) el.textContent = aircraft.toLocaleString(); }
+  if (satellites != null) { const el = document.getElementById('hud-count-satellites'); if (el) el.textContent = satellites.toLocaleString(); }
+  if (objects    != null) { const el = document.getElementById('hud-count-objects');    if (el) el.textContent = objects.toLocaleString(); }
+}
+
+/**
+ * Set a status message in the bottom-centre panel.
+ * @param {string} msg   e.g. '⚠ FEED TIMEOUT'
+ * @param {'ok'|'warn'|'error'} level
+ */
+export function setHUDStatus(msg, level = 'ok') {
+  const el = document.getElementById('hud-status-msg');
+  if (!el) return;
+  el.style.color = _hudColours[level] ?? _hudColours.ok;
+  el.textContent = msg;
+}
+
+// ── HUD overlay (reticle + corner brackets + coordinate readout) ──────────────
+
+// Shared state so coordinate panel can update from camera-change events
+let _hudViewer = null;
 
 function drawReticle(viewer) {
+  _hudViewer = viewer;
+
+  // ── Canvas overlay (reticle + corner brackets) ────────────────────────────
   const canvas  = viewer.canvas;
   const overlay = document.createElement('canvas');
-  overlay.style.cssText = `
-    position:fixed;inset:0;pointer-events:none;z-index:9;width:100%;height:100%;
-  `;
+  overlay.style.cssText = 'position:fixed;inset:0;pointer-events:none;z-index:9;width:100%;height:100%;';
   document.body.appendChild(overlay);
 
-  function render() {
+  // ── Bottom-left: CROSSHAIR POSITION (camera centre, not cursor) ──────────
+  const coordPanel = document.createElement('div');
+  coordPanel.id = 'hud-coord-panel';
+  coordPanel.style.cssText = `
+    position: fixed;
+    bottom: 56px;
+    left: 16px;
+    pointer-events: auto;
+    z-index: 10;
+    font-family: 'Share Tech Mono', 'Courier New', monospace;
+    font-size: 11px;
+    line-height: 1.7;
+    color: #ffffff;
+  `;
+  coordPanel.innerHTML = `
+    <div style="
+      background: rgba(4,10,18,0.82);
+      border: 1px solid rgba(0,255,136,0.25);
+      border-left: 2px solid rgba(0,255,136,0.7);
+      padding: 7px 12px 7px 10px;
+      backdrop-filter: blur(8px);
+      min-width: 220px;
+    ">
+      <div style="color:rgba(0,255,136,0.6);font-size:9px;letter-spacing:0.15em;margin-bottom:3px">✛ CROSSHAIR POSITION</div>
+      <div id="hud-lat"       style="color:#e8ffe0">LAT   <span style="color:#fff;font-weight:500">–</span></div>
+      <div id="hud-lon"       style="color:#e8ffe0">LON   <span style="color:#fff;font-weight:500">–</span></div>
+      <div id="hud-elev"      style="color:#e8ffe0;margin-top:2px">ELEV  <span style="color:#fff;font-weight:500">–</span></div>
+      <div id="hud-localtime" style="color:#e8ffe0;margin-top:2px;border-top:1px solid rgba(0,255,136,0.1);padding-top:4px">LOCAL TIME: <span style="color:rgba(0,255,136,0.9);font-weight:500">–</span></div>
+      <div style="margin-top:6px;border-top:1px solid rgba(0,255,136,0.1);padding-top:6px;display:flex;align-items:center;gap:5px;pointer-events:auto;">
+        <input
+          id="hud-locsearch-input"
+          type="text"
+          placeholder="Search city or place..."
+          autocomplete="off"
+          style="
+            width:132px;
+            padding:3px 6px;
+            background:rgba(0,0,0,0.55);
+            border:1px solid rgba(0,255,136,0.28);
+            color:#00ff88;
+            font-family:'Share Tech Mono',monospace;
+            font-size:10px;
+            letter-spacing:0.04em;
+            outline:none;
+          "
+        />
+        <button
+          id="hud-locsearch-btn"
+          style="
+            padding:3px 7px;
+            background:rgba(0,0,0,0.55);
+            border:1px solid rgba(0,255,136,0.28);
+            color:rgba(0,255,136,0.8);
+            font-family:'Share Tech Mono',monospace;
+            font-size:10px;
+            letter-spacing:0.08em;
+            cursor:pointer;
+          "
+        >GO</button>
+      </div>
+      <div id="hud-locsearch-status" style="color:rgba(0,255,136,0.55);font-size:9px;letter-spacing:0.06em;margin-top:4px;min-height:12px;pointer-events:none;"></div>
+    </div>
+  `;
+  document.body.appendChild(coordPanel);
+
+  wireLocationSearch(viewer);
+
+  // ── Top-centre status bar ─────────────────────────────────────────────────
+  const statusBar = document.createElement('div');
+  statusBar.id = 'hud-status-bar';
+  statusBar.style.cssText = `
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    height: 38px;
+    pointer-events: none;
+    z-index: 10;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'Share Tech Mono', 'Courier New', monospace;
+    font-size: 11px;
+  `;
+  statusBar.innerHTML = `
+    <div style="
+      background: rgba(4,10,18,0.88);
+      border: 1px solid rgba(0,255,136,0.2);
+      border-top: none;
+      padding: 0 20px;
+      height: 100%;
+      display: flex;
+      align-items: center;
+      gap: 20px;
+      backdrop-filter: blur(10px);
+    ">
+      <span style="color:rgba(0,255,136,0.55);font-size:9px;letter-spacing:0.2em">WORLDVIEW / UNCLASSIFIED</span>
+      <span style="color:rgba(255,255,255,0.15)">|</span>
+      <span id="hud-utc" style="color:rgba(0,255,136,0.8);letter-spacing:0.08em">–</span>
+      <span style="color:rgba(255,255,255,0.15)">|</span>
+      <span style="
+        color: #00ff88;
+        font-size: 9px;
+        letter-spacing: 0.18em;
+        border: 1px solid rgba(0,255,136,0.4);
+        padding: 1px 7px;
+        background: rgba(0,255,136,0.08);
+      ">● LIVE</span>
+    </div>
+  `;
+  document.body.appendChild(statusBar);
+
+  // ── Bottom-right altitude/zoom readout ────────────────────────────────────
+  const zoomPanel = document.createElement('div');
+  zoomPanel.id = 'hud-zoom-panel';
+  zoomPanel.style.cssText = `
+    position: fixed;
+    bottom: 56px;
+    right: 16px;
+    pointer-events: none;
+    z-index: 10;
+    font-family: 'Share Tech Mono', 'Courier New', monospace;
+    font-size: 11px;
+    line-height: 1.7;
+    text-align: right;
+  `;
+  zoomPanel.innerHTML = `
+    <div style="
+      background: rgba(4,10,18,0.82);
+      border: 1px solid rgba(0,255,136,0.25);
+      border-right: 2px solid rgba(0,255,136,0.7);
+      padding: 7px 10px 7px 12px;
+      backdrop-filter: blur(8px);
+      min-width: 170px;
+    ">
+      <div style="color:rgba(0,255,136,0.6);font-size:9px;letter-spacing:0.15em;margin-bottom:3px;text-align:right">CAMERA</div>
+      <div id="hud-cam-alt" style="color:#e8ffe0">ELEV <span style="color:#fff;font-weight:500">–</span></div>
+      <div id="hud-cam-heading" style="color:#e8ffe0">HDG  <span style="color:#fff;font-weight:500">–</span></div>
+      <div id="hud-cam-pitch" style="color:#e8ffe0;margin-top:2px">PITCH <span style="color:#fff;font-weight:500">–</span></div>
+    </div>
+  `;
+  document.body.appendChild(zoomPanel);
+
+  // ── Bottom-centre: SYSTEM STATUS ──────────────────────────────────────────
+  const statusPanel = document.createElement('div');
+  statusPanel.id = 'hud-status-panel';
+  statusPanel.style.cssText = `
+    position: fixed;
+    bottom: 0;
+    left: 50%;
+    transform: translateX(-50%);
+    pointer-events: none;
+    z-index: 10;
+    font-family: 'Share Tech Mono', 'Courier New', monospace;
+    font-size: 11px;
+    line-height: 1.7;
+    text-align: center;
+  `;
+  statusPanel.innerHTML = `
+    <div style="
+      background: rgba(4,10,18,0.82);
+      border: 1px solid rgba(0,255,136,0.22);
+      border-bottom: none;
+      padding: 6px 18px 7px;
+      backdrop-filter: blur(8px);
+      white-space: nowrap;
+    ">
+      <div style="color:rgba(0,255,136,0.6);font-size:9px;letter-spacing:0.15em;margin-bottom:4px">SYSTEM STATUS</div>
+      <div style="display:flex;gap:20px;align-items:center;justify-content:center">
+        <span id="hud-status-msg" style="color:rgba(0,255,136,0.7);font-size:9px;letter-spacing:0.1em">● NOMINAL · ALL FEEDS ACTIVE</span>
+      </div>
+      <div style="display:flex;gap:16px;margin-top:5px;justify-content:center;border-top:1px solid rgba(0,255,136,0.1);padding-top:5px">
+        <span style="color:#e8ffe0">✈️ <span id="hud-count-aircraft" style="color:#fff;font-weight:500">0</span></span>
+        <span style="color:rgba(255,255,255,0.2)">|</span>
+        <span style="color:#e8ffe0">🛰️ <span id="hud-count-satellites" style="color:#fff;font-weight:500">0</span></span>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(statusPanel);
+
+  // ── Canvas render (reticle + corner brackets) ─────────────────────────────
+  function renderCanvas() {
     overlay.width  = canvas.width;
     overlay.height = canvas.height;
     const ctx = overlay.getContext('2d');
-    const cx  = overlay.width  / 2;
-    const cy  = overlay.height / 2;
-    const r = 22, gap = 5;
+    const w = overlay.width, h = overlay.height;
+    const cx = w / 2, cy = h / 2;
 
-    ctx.clearRect(0, 0, overlay.width, overlay.height);
-    ctx.strokeStyle = 'rgba(0,255,136,0.55)';
+    ctx.clearRect(0, 0, w, h);
+
+    // ── Corner bracket decorations ──────────────────────────────────────────
+    const arm = 28, margin = 18;
+    const corners = [
+      [margin, margin, 1, 1],
+      [w - margin, margin, -1, 1],
+      [margin, h - margin, 1, -1],
+      [w - margin, h - margin, -1, -1],
+    ];
+    ctx.strokeStyle = 'rgba(0,255,136,0.5)';
+    ctx.lineWidth = 1.5;
+    corners.forEach(([x, y, dx, dy]) => {
+      ctx.beginPath(); ctx.moveTo(x + dx * arm, y); ctx.lineTo(x, y); ctx.lineTo(x, y + dy * arm); ctx.stroke();
+    });
+
+    // ── Subtle edge scan-line (top & bottom) ────────────────────────────────
+    ctx.strokeStyle = 'rgba(0,255,136,0.08)';
     ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(margin + arm + 12, margin); ctx.lineTo(w - margin - arm - 12, margin); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(margin + arm + 12, h - margin); ctx.lineTo(w - margin - arm - 12, h - margin); ctx.stroke();
 
+    // ── Centre reticle ───────────────────────────────────────────────────────
+    const r = 22, gap = 5;
+    ctx.strokeStyle = 'rgba(0,255,136,0.6)';
+    ctx.lineWidth = 1;
     [[cx-r-gap,cy,cx-gap,cy],[cx+gap,cy,cx+r+gap,cy],
      [cx,cy-r-gap,cx,cy-gap],[cx,cy+gap,cx,cy+r+gap]].forEach(([x1,y1,x2,y2]) => {
       ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.stroke();
     });
-    ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI*2); ctx.stroke();
-    [0,Math.PI/2,Math.PI,3*Math.PI/2].forEach(a => {
+    ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke();
+    // tick marks on ring
+    [0, Math.PI/2, Math.PI, 3*Math.PI/2].forEach(a => {
       ctx.beginPath();
-      ctx.moveTo(cx+(r-6)*Math.cos(a), cy+(r-6)*Math.sin(a));
-      ctx.lineTo(cx+(r+4)*Math.cos(a), cy+(r+4)*Math.sin(a));
+      ctx.moveTo(cx + (r - 6) * Math.cos(a), cy + (r - 6) * Math.sin(a));
+      ctx.lineTo(cx + (r + 4) * Math.cos(a), cy + (r + 4) * Math.sin(a));
       ctx.stroke();
     });
+    // small dot at exact centre
+    ctx.fillStyle = 'rgba(255, 72, 0, 0.8)';
+    ctx.beginPath(); ctx.arc(cx, cy, 2, 0, Math.PI * 2); ctx.fill();
   }
-  window.addEventListener('resize', render);
-  render();
+
+  // ── Camera position updater ───────────────────────────────────────────────
+  function updateCameraReadout() {
+    try {
+      const cam = viewer.camera;
+      const cart = cam.positionCartographic;
+      if (!cart) return;
+
+      const lat = Cesium.Math.toDegrees(cart.latitude);
+      const lon = Cesium.Math.toDegrees(cart.longitude);
+      const elevKm = cart.height / 1000;
+      const heading = Cesium.Math.toDegrees(cam.heading);
+      const pitch   = Cesium.Math.toDegrees(cam.pitch);
+
+      const fmt = (v, d) => v.toFixed(d);
+
+      // Status bar centre
+      const camPosEl = document.getElementById('hud-cam-pos');
+      if (camPosEl) camPosEl.textContent =
+        `${lat >= 0 ? 'N' : 'S'}${fmt(Math.abs(lat),2)}°  ${lon >= 0 ? 'E' : 'W'}${fmt(Math.abs(lon),2)}°`;
+
+      // Bottom-right camera panel
+      const altEl = document.getElementById('hud-cam-alt');
+      if (altEl) altEl.innerHTML = `ELEV <span style="color:#fff;font-weight:500">${elevKm < 1 ? (cart.height).toFixed(0) + ' m' : fmt(elevKm,1) + ' km'}</span>`;
+
+      const hdgEl = document.getElementById('hud-cam-heading');
+      if (hdgEl) hdgEl.innerHTML = `HDG  <span style="color:#fff;font-weight:500">${fmt((heading + 360) % 360, 1)}°</span>`;
+
+      const pitchEl = document.getElementById('hud-cam-pitch');
+      if (pitchEl) pitchEl.innerHTML = `PITCH <span style="color:#fff;font-weight:500">${fmt(pitch,1)}°</span>`;
+
+    } catch { /* ignore during init */ }
+  }
+
+  // ── UTC clock ─────────────────────────────────────────────────────────────
+  function updateClock() {
+    const now = new Date();
+    const utc = now.toISOString().replace('T',' ').substring(0,19) + ' UTC';
+    const el = document.getElementById('hud-utc');
+    if (el) el.textContent = utc;
+  }
+
+  // ── Crosshair (camera centre) position tracker ────────────────────────────
+  // Picks the globe point at the exact screen centre on every camera move.
+  function updateCrosshairPosition() {
+    try {
+      const w = viewer.canvas.clientWidth;
+      const h = viewer.canvas.clientHeight;
+      const centre = new Cesium.Cartesian2(w / 2, h / 2);
+      const ray    = viewer.camera.getPickRay(centre);
+      const cart3  = viewer.scene.globe.pick(ray, viewer.scene);
+
+      if (!cart3) return;
+      const carto = Cesium.Cartographic.fromCartesian(cart3);
+      const lat   = Cesium.Math.toDegrees(carto.latitude);
+      const lon   = Cesium.Math.toDegrees(carto.longitude);
+      const elev  = carto.height;
+
+      const fmt = (v, d) => Math.abs(v).toFixed(d);
+
+      const latEl  = document.getElementById('hud-lat');
+      const lonEl  = document.getElementById('hud-lon');
+      const elevEl = document.getElementById('hud-elev');
+      const ltEl   = document.getElementById('hud-localtime');
+
+      if (latEl)  latEl.innerHTML  = `LAT   <span style="color:#fff;font-weight:500">${lat  >= 0 ? 'N' : 'S'}${fmt(lat,  4)}°</span>`;
+      if (lonEl)  lonEl.innerHTML  = `LON   <span style="color:#fff;font-weight:500">${lon  >= 0 ? 'E' : 'W'}${fmt(lon,  4)}°</span>`;
+      if (elevEl) elevEl.innerHTML = `ELEV  <span style="color:#fff;font-weight:500">${elev < 1000 ? elev.toFixed(0) + ' m' : (elev / 1000).toFixed(2) + ' km'}</span>`;
+
+      // Local time at crosshair: UTC offset ≈ lon / 15 hours
+      if (ltEl) {
+        const offsetHrs  = lon / 15;
+        const nowUtcMs   = Date.now();
+        const localMs    = nowUtcMs + offsetHrs * 3_600_000;
+        const localDate  = new Date(localMs);
+        const hh  = localDate.getUTCHours()  .toString().padStart(2, '0');
+        const mm  = localDate.getUTCMinutes().toString().padStart(2, '0');
+        const ss  = localDate.getUTCSeconds().toString().padStart(2, '0');
+        const sign = offsetHrs >= 0 ? '+' : '−';
+        const absH = Math.abs(offsetHrs).toFixed(1).replace('.0', '');
+        ltEl.innerHTML = `LOCAL TIME: <span style="color:rgba(0,255,136,0.9);font-weight:500">${hh}:${mm}:${ss} (UTC${sign}${absH})</span>`;
+      }
+    } catch { /* globe not ready */ }
+  }
+
+  // ── Wire everything up ────────────────────────────────────────────────────
+  window.addEventListener('resize', renderCanvas);
+  viewer.camera.changed.addEventListener(updateCameraReadout);
+  viewer.camera.changed.addEventListener(updateCrosshairPosition);
+  viewer.camera.moveEnd.addEventListener(updateCameraReadout);
+  viewer.camera.moveEnd.addEventListener(updateCrosshairPosition);
+  setInterval(() => { updateClock(); updateCrosshairPosition(); }, 1000);
+  updateClock();
+  updateCameraReadout();
+  updateCrosshairPosition();
+  renderCanvas();
+}
+
+// ── Location search (city presets + OpenStreetMap Nominatim fallback) ──────
+
+const NOMINATIM_URL = 'https://nominatim.openstreetmap.org/search';
+
+function wireLocationSearch(viewer) {
+  const input  = document.getElementById('hud-locsearch-input');
+  const btn    = document.getElementById('hud-locsearch-btn');
+  const status = document.getElementById('hud-locsearch-status');
+  if (!input || !btn) return;
+
+  async function runSearch() {
+    const q = input.value.trim();
+    if (!q) {
+      setSearchStatus(status, 'Type a place', true);
+      return;
+    }
+
+    const aliases = {
+      'new york': 'nyc',
+      'new york city': 'nyc',
+      ny: 'nyc',
+      global: 'globe',
+      world: 'globe',
+    };
+
+    const key = aliases[q.toLowerCase()] ?? q.toLowerCase();
+    const preset = CITIES[key];
+    if (preset) {
+      flyTo(viewer, { ...preset, pitch: -90 });
+      setSearchStatus(status, 'Found');
+      input.value = '';
+      return;
+    }
+
+    setSearchStatus(status, 'Searching...');
+    try {
+      const params = new URLSearchParams({
+        q,
+        format: 'jsonv2',
+        limit: '8',
+        addressdetails: '1',
+        dedupe: '1',
+      });
+
+      const resp = await fetch(`${NOMINATIM_URL}?${params}`, {
+        headers: { Accept: 'application/json' },
+      });
+      if (!resp.ok) throw new Error(String(resp.status));
+
+      const results = await resp.json();
+      const best = (Array.isArray(results) ? results : []).reduce((acc, item) => {
+        const type = item?.type ?? '';
+        const baseScore = { city: 120, town: 110, village: 95, hamlet: 80, suburb: 55 }[type] ?? 40;
+        const cityStr = [item?.address?.city, item?.address?.town, item?.address?.village]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase();
+        const score = baseScore + (item?.class === 'place' ? 25 : 0) + (cityStr.includes(q.toLowerCase()) ? 80 : 0);
+        if (!acc || score > acc._score) return { ...item, _score: score };
+        return acc;
+      }, null);
+
+      if (!best) {
+        setSearchStatus(status, 'Not found', true);
+        return;
+      }
+
+      const lat = Number(best.lat);
+      const lon = Number(best.lon);
+      if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+        setSearchStatus(status, 'Bad result', true);
+        return;
+      }
+
+      flyTo(viewer, { lon, lat, alt: 70000, pitch: -90 });
+      setSearchStatus(status, 'Found');
+      input.value = '';
+    } catch (err) {
+      console.warn('[HUD] Location search failed:', err?.message ?? err);
+      setSearchStatus(status, 'Failed', true);
+    }
+  }
+
+  btn.addEventListener('click', runSearch);
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      runSearch();
+    }
+  });
+}
+
+function setSearchStatus(el, text, isError = false) {
+  if (!el) return;
+  el.textContent = text;
+  el.style.color = isError ? 'rgba(255,80,80,0.85)' : 'rgba(0,255,136,0.6)';
+  clearTimeout(el._clearTimer);
+  el._clearTimer = setTimeout(() => {
+    el.textContent = '';
+  }, 2800);
 }
 
 // ── Entity picker + enriched panel ───────────────────────────────────────────
+
+let currentSelectedFlightId = null;
 
 function initEntityPicker(viewer) {
   const handler = new Cesium.ScreenSpaceEventHandler(viewer.canvas);
@@ -93,7 +602,15 @@ function initEntityPicker(viewer) {
   // ── Click handler ──────────────────────────────────────────────────────────
   handler.setInputAction(async (click) => {
     const picked = viewer.scene.pick(click.position);
-    if (!Cesium.defined(picked) || !picked.id) { panel.style.display = 'none'; return; }
+    if (!Cesium.defined(picked) || !picked.id) { 
+      // Remove glow from previously selected flight
+      if (currentSelectedFlightId) {
+        setFlightGlow(currentSelectedFlightId, false);
+        currentSelectedFlightId = null;
+      }
+      panel.style.display = 'none'; 
+      return; 
+    }
 
     const entity = picked.id;
     const props  = entity.properties;
@@ -114,6 +631,13 @@ function initEntityPicker(viewer) {
       // Live type code from ADS-B feed (e.g. "B38M") — available immediately, no lookup needed
       const liveTypecode = (props.typecode?.getValue() ?? '').toUpperCase() || null;
 
+      // Remove glow from previously selected flight and apply to new one
+      if (currentSelectedFlightId && currentSelectedFlightId !== icao.toLowerCase()) {
+        setFlightGlow(currentSelectedFlightId, false);
+      }
+      currentSelectedFlightId = icao.toLowerCase();
+      setFlightGlow(currentSelectedFlightId, true);
+
       // Show a loading state immediately, pre-filled with live ADS-B data we already have
       panel.style.display = 'block';
       renderPanel(panel, { icao, callsign, altFt, kts, heading, squawk, vert, provider, dbFlags,
@@ -126,6 +650,11 @@ function initEntityPicker(viewer) {
       renderPanel(panel, { icao, callsign, altFt, kts, heading, squawk, vert, provider, dbFlags, ...info }, viewer, entity);
 
     } else if (type === 'satellite') {
+      // Remove glow from previously selected flight when selecting satellite
+      if (currentSelectedFlightId) {
+        setFlightGlow(currentSelectedFlightId, false);
+        currentSelectedFlightId = null;
+      }
       const name     = props.name?.getValue() ?? entity.id;
       const provider = (props.provider?.getValue() ?? 'celestrak').toUpperCase();
       panel.style.display = 'block';
@@ -202,27 +731,35 @@ async function fetchAircraftInfo(icao, callsign) {
   // ── 2. Live route lookup by callsign (short TTL cache) ────────────────────
   // Routes change per flight so we cache by callsign with a 5-min TTL,
   // NOT by ICAO (which would show yesterday's route for today's flight).
+  // Only attempt lookup for proper airline-style callsigns (e.g. UAL123, BAW456)
+  // Skip tail numbers and other non-airline identifiers
   if (callsign && callsign.length >= 4) {
-    const cached = routeCache.get(callsign);
-    if (cached && Date.now() - cached.ts < ROUTE_TTL) {
-      info.route    = cached.route;
-      if (!info.operator) info.operator = cached.operator;
-    } else {
-      try {
-        const r = await fetch(`https://api.adsbdb.com/v0/callsign/${callsign}`, { signal: AbortSignal.timeout(4000) });
-        if (r.ok) {
-          const d  = await r.json();
-          const fl = d.response?.flightroute;
-          if (fl) {
-            const orig = fl.origin?.iata_code      ?? fl.origin?.icao_code      ?? '';
-            const dest = fl.destination?.iata_code ?? fl.destination?.icao_code ?? '';
-            info.route = (orig && dest) ? `${orig} → ${dest}` : null;
-            const airline = fl.airline?.name ?? null;
-            if (!info.operator && airline) info.operator = airline;
-            routeCache.set(callsign, { route: info.route, operator: airline, ts: Date.now() });
+    // Validate callsign is in airline format: 2-3 letters + 1-4 digits (+ optional letter)
+    // Valid: UAL123, BAW456, RYR22A, Invalid: 405LP, N404LP, TEST
+    const isAirlineCallsign = /^[A-Z]{2,3}\d{1,4}[A-Z]?$/.test(callsign);
+    
+    if (isAirlineCallsign) {
+      const cached = routeCache.get(callsign);
+      if (cached && Date.now() - cached.ts < ROUTE_TTL) {
+        info.route    = cached.route;
+        if (!info.operator) info.operator = cached.operator;
+      } else {
+        try {
+          const r = await fetch(`https://api.adsbdb.com/v0/callsign/${callsign}`, { signal: AbortSignal.timeout(4000) });
+          if (r.ok) {
+            const d  = await r.json();
+            const fl = d.response?.flightroute;
+            if (fl) {
+              const orig = fl.origin?.iata_code      ?? fl.origin?.icao_code      ?? '';
+              const dest = fl.destination?.iata_code ?? fl.destination?.icao_code ?? '';
+              info.route = (orig && dest) ? `${orig} → ${dest}` : null;
+              const airline = fl.airline?.name ?? null;
+              if (!info.operator && airline) info.operator = airline;
+              routeCache.set(callsign, { route: info.route, operator: airline, ts: Date.now() });
+            }
           }
-        }
-      } catch { /* ignore */ }
+        } catch { /* ignore */ }
+      }
     }
   }
 
@@ -247,6 +784,8 @@ function renderPanel(panel, data, viewer, entity) {
   const typeDisplay = typecode
     ? (typeDesc && typeDesc !== typecode ? `${typecode} · ${typeDesc}` : typecode)
     : typeDesc;
+  const has3dModel = hasAssetModel(typecode);
+  const aircraftIcon = has3dModel ? '3D ✈' : '✈';
 
   const row = (label, val, dim = false) => val
     ? `<tr><td style="opacity:0.5;padding-right:12px;white-space:nowrap">${label}</td><td style="${dim?'opacity:0.65':''}font-weight:500">${val}</td></tr>`
@@ -258,7 +797,7 @@ function renderPanel(panel, data, viewer, entity) {
   panel.innerHTML = `
     <div style="background:rgba(0,0,0,0.3);padding:12px 16px;border-bottom:1px solid ${acColor}44;border-left:3px solid ${acColor}">
       <div style="display:flex;align-items:center;gap:10px">
-        <span style="font-size:20px;color:${acColor}">✈</span>
+        <span style="font-size:20px;color:${acColor}">${aircraftIcon}</span>
         <div>
           <div style="font-size:15px;font-weight:bold;letter-spacing:0.12em;color:#fff">
             ${callsign !== icao ? callsign : (registration ?? icao)}
@@ -326,6 +865,11 @@ function renderPanel(panel, data, viewer, entity) {
 function wirePanelClose(panel) {
   document.getElementById('panel-close')?.addEventListener('click', () => {
     stopFollow();
+    // Remove glow from selected flight
+    if (currentSelectedFlightId) {
+      setFlightGlow(currentSelectedFlightId, false);
+      currentSelectedFlightId = null;
+    }
     panel.style.display = 'none';
   });
 }

@@ -37,25 +37,68 @@ const TRACK_MINUTES = 90;
 const TRACK_STEPS   = 60;
 const MAX_SATS      = 200;   // cap for performance
 
-// ── CelesTrak GP JSON feeds (no key, no rate limit) ──────────────────────────
-// Using the new GP JSON endpoint which supports catalog numbers > 69999
+// ── CelesTrak GP TLE feeds (no key, no rate limit) ───────────────────────────
+// Each feed has a primary URL (via Vite proxy → celestrak.org) and a direct
+// HTTPS fallback in case the proxy target times out or is unreachable.
+// CelesTrak also mirrors data at celestrak.com — we try both hosts.
 const CELESTRAK_FEEDS = [
-  { label: 'ISS',      url: '/api/celestrak/NORAD/elements/gp.php?CATNR=25544&FORMAT=TLE' },
-  { label: 'Stations', url: '/api/celestrak/NORAD/elements/gp.php?GROUP=stations&FORMAT=TLE' },
-  { label: 'Starlink', url: '/api/celestrak/NORAD/elements/gp.php?GROUP=starlink&FORMAT=TLE' },
-  { label: 'Military', url: '/api/celestrak/NORAD/elements/gp.php?GROUP=military&FORMAT=TLE' },
-  { label: 'Active',   url: '/api/celestrak/NORAD/elements/gp.php?GROUP=active&FORMAT=TLE' },
+  {
+    label:    'ISS',
+    url:      '/api/celestrak/NORAD/elements/gp.php?CATNR=25544&FORMAT=TLE',
+    fallback: [
+      'https://celestrak.org/NORAD/elements/gp.php?CATNR=25544&FORMAT=TLE',
+      'https://celestrak.com/NORAD/elements/gp.php?CATNR=25544&FORMAT=TLE',
+    ],
+  },
+  {
+    label:    'Stations',
+    url:      '/api/celestrak/NORAD/elements/gp.php?GROUP=stations&FORMAT=TLE',
+    fallback: [
+      'https://celestrak.org/NORAD/elements/gp.php?GROUP=stations&FORMAT=TLE',
+      'https://celestrak.com/NORAD/elements/gp.php?GROUP=stations&FORMAT=TLE',
+    ],
+  },
+  {
+    label:    'Starlink',
+    url:      '/api/celestrak/NORAD/elements/gp.php?GROUP=starlink&FORMAT=TLE',
+    fallback: [
+      'https://celestrak.org/NORAD/elements/gp.php?GROUP=starlink&FORMAT=TLE',
+      'https://celestrak.com/NORAD/elements/gp.php?GROUP=starlink&FORMAT=TLE',
+    ],
+  },
+  {
+    label:    'Military',
+    url:      '/api/celestrak/NORAD/elements/gp.php?GROUP=military&FORMAT=TLE',
+    fallback: [
+      'https://celestrak.org/NORAD/elements/gp.php?GROUP=military&FORMAT=TLE',
+      'https://celestrak.com/NORAD/elements/gp.php?GROUP=military&FORMAT=TLE',
+    ],
+  },
+  {
+    label:    'Active',
+    url:      '/api/celestrak/NORAD/elements/gp.php?GROUP=active&FORMAT=TLE',
+    fallback: [
+      'https://celestrak.org/NORAD/elements/gp.php?GROUP=active&FORMAT=TLE',
+      'https://celestrak.com/NORAD/elements/gp.php?GROUP=active&FORMAT=TLE',
+    ],
+  },
 ];
 
+// Per-feed fetch timeout — don't let a single stalled proxy hang the whole load
+const CELESTRAK_TIMEOUT_MS = 2_000;
+
 // ── Space-Track feeds (free account required at space-track.org) ──────────────
-const SPACETRACK_LOGIN_URL = 'https://www.space-track.org/ajaxauth/login';
-const SPACETRACK_TLE_URL   = 'https://www.space-track.org/basicspacedata/query/class/gp/EPOCH/%3Enow-1/orderby/NORAD_CAT_ID/limit/200/format/tle';
+// ⚠️  Must go through the Vite /api/spacetrack proxy — direct browser fetches
+//     are blocked by CORS (space-track.org sends no Access-Control-Allow-Origin).
+const SPACETRACK_LOGIN_URL = '/api/spacetrack/ajaxauth/login';
+const SPACETRACK_TLE_URL   = '/api/spacetrack/basicspacedata/query/class/gp/EPOCH/%3Enow-1/orderby/NORAD_CAT_ID/limit/200/format/tle';
 
 // ── N2YO (1000 req/hr free tier, requires API key) ────────────────────────────
 // N2YO doesn't provide bulk TLE dumps but does provide individual satellite TLE.
 // We use their "above" endpoint to get satellites visible from a reference point.
+// ⚠️  Must go through the Vite /api/n2yo proxy — api.n2yo.com sends no CORS headers.
 const N2YO_ABOVE_URL = (lat, lon, alt, radius, catid) =>
-  `https://api.n2yo.com/rest/v1/satellite/above/${lat}/${lon}/${alt}/${radius}/${catid}/&apiKey=${N2YO_KEY}`;
+  `/api/n2yo/rest/v1/satellite/above/${lat}/${lon}/${alt}/${radius}/${catid}/&apiKey=${N2YO_KEY}`;
 
 // Hardcoded TLE fallback if all providers fail (timeout/network issues)
 const ISS_FALLBACK = [
@@ -84,6 +127,24 @@ const BUILTIN_TLE_FALLBACKS = [
 /** @type {Map<string, { satrec: object, entity: Cesium.Entity, trackEntity: Cesium.Entity }>} */
 const satMap  = new Map();
 let enabled   = true;
+let lastSatelliteStatusKey = '';
+
+function publishSystemStatus(msg, level = 'ok', key = `${level}:${msg}`) {
+  if (lastSatelliteStatusKey === key) return;
+  lastSatelliteStatusKey = key;
+  if (typeof window === 'undefined') return;
+
+  const ts = Date.now();
+  window.__worldviewSystemStatus = { msg, level, key, source: 'satellites', ts };
+  window.__worldviewSubsystemStatus = {
+    ...(window.__worldviewSubsystemStatus ?? {}),
+    satellites: { msg, level, key, ts },
+  };
+
+  window.dispatchEvent(new CustomEvent('worldview:system-status', {
+    detail: { msg, level, source: 'satellites', key, ts },
+  }));
+}
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
@@ -105,6 +166,11 @@ export async function initSatellites(viewer) {
   }, PROPAGATE_MS);
 
   console.info(`[Satellites] ${satMap.size} satellites tracked (${PROVIDER})`);
+
+  // Publish ok if no errors were encountered during load
+  if (!lastSatelliteStatusKey) {
+    publishSystemStatus(`● SATELLITE FEED OK · ${PROVIDER.toUpperCase()}`, 'ok', `sat:ok:${PROVIDER}`);
+  }
 
   return {
     setEnabled(val) {
@@ -141,53 +207,107 @@ async function loadTLEs() {
 
 // ── Provider: CelesTrak (free, no key) ───────────────────────────────────────
 
+/**
+ * Fetch a URL with an AbortController-based timeout.
+ */
+async function fetchWithTimeout(url, timeoutMs) {
+  const ctrl  = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(new Error('timeout')), timeoutMs);
+  try {
+    return await fetch(url, { signal: ctrl.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Fetch one CelesTrak feed, trying the proxied URL first and then the
+ * direct HTTPS fallback if the proxy times out or returns an error.
+ */
+async function fetchCelesTrakFeed(feed) {
+  // 1. Try via Vite proxy (avoids CORS, but can ETIMEDOUT in some networks)
+  try {
+    const resp = await fetchWithTimeout(feed.url, CELESTRAK_TIMEOUT_MS);
+    if (resp.ok) return resp.text();
+    throw new Error(`proxy ${resp.status}`);
+  } catch (proxyErr) {
+    console.debug(`[Satellites] CelesTrak ${feed.label} proxy failed (${proxyErr.message}), trying direct…`);
+  }
+
+  // 2. Direct HTTPS fetch (try both celestrak.org and celestrak.com mirrors)
+  let lastErr = null;
+  for (const url of feed.fallback) {
+    try {
+      const resp = await fetchWithTimeout(url, CELESTRAK_TIMEOUT_MS);
+      if (resp.ok) return resp.text();
+      lastErr = new Error(`direct ${resp.status}`);
+    } catch (err) {
+      lastErr = err;
+    }
+  }
+  throw lastErr ?? new Error('direct fetch failed');
+}
+
 async function loadCelesTrak() {
   const records = [];
+  let failedFeeds = 0;
   for (const feed of CELESTRAK_FEEDS) {
     try {
-      const resp = await fetch(feed.url);
-      if (!resp.ok) throw new Error(`${resp.status}`);
-      const text = await resp.text();
+      const text   = await fetchCelesTrakFeed(feed);
       const parsed = parseTLEText(text);
       records.push(...parsed);
       console.debug(`[Satellites] CelesTrak ${feed.label}: ${parsed.length} TLEs`);
     } catch (err) {
       console.warn(`[Satellites] CelesTrak ${feed.label} failed:`, err.message);
+      failedFeeds += 1;
+      publishSystemStatus(`⚠ SAT FEED FAIL · CELESTRAK ${feed.label.toUpperCase()} · ${err?.message ?? 'request failed'}`, 'warn', `sat:celestrak:${feed.label}:${err?.message ?? 'unknown'}`);
     }
     if (records.length >= MAX_SATS) break;
   }
+
+  if (failedFeeds > 0 && records.length > 0) {
+    publishSystemStatus(`⚠ SATELLITE FEED DEGRADED · ${failedFeeds}/${CELESTRAK_FEEDS.length} CELESTRAK FEEDS FAILED`, 'warn', `sat:celestrak:degraded:${failedFeeds}`);
+  }
+
   // If all feeds failed, use built-in fallback set
   if (!records.length) {
     console.warn('[Satellites] All CelesTrak feeds failed or timed out. Using built-in TLE fallback set.');
+    publishSystemStatus('⚠ ALL CELESTRAK SATELLITE FEEDS FAILED · USING BUILT-IN TLE FALLBACKS', 'error', 'sat:celestrak:all-failed');
     return BUILTIN_TLE_FALLBACKS;
   }
   return records;
 }
 
 // ── Provider: Space-Track (free account, US Space Force authoritative data) ───
+// All requests go through the Vite /api/spacetrack proxy to avoid CORS.
+// Space-Track uses a session cookie set after POST /ajaxauth/login — the proxy
+// passes Set-Cookie headers back to the browser so subsequent requests work.
 
 async function loadSpaceTrack() {
   if (!SPACETRACK_USER || !SPACETRACK_PASS) {
     console.warn('[Satellites] Space-Track credentials not set — falling back to CelesTrak.');
+    publishSystemStatus('⚠ SPACETRACK CREDS MISSING · FALLING BACK TO CELESTRAK', 'warn', 'sat:spacetrack:creds-missing');
     return loadCelesTrak();
   }
   try {
-    // Login (sets session cookie)
-    await fetch(SPACETRACK_LOGIN_URL, {
+    // Login via proxy — sets a spacetrack_session cookie in the browser
+    const loginResp = await fetch(SPACETRACK_LOGIN_URL, {
       method:      'POST',
       credentials: 'include',
       headers:     { 'Content-Type': 'application/x-www-form-urlencoded' },
       body:        `identity=${encodeURIComponent(SPACETRACK_USER)}&password=${encodeURIComponent(SPACETRACK_PASS)}`,
     });
+    if (!loginResp.ok) throw new Error(`login ${loginResp.status}`);
 
     const resp = await fetch(SPACETRACK_TLE_URL, { credentials: 'include' });
     if (!resp.ok) throw new Error(`Space-Track ${resp.status}`);
-    const text = await resp.text();
+    const text    = await resp.text();
     const records = parseTLEText(text);
     console.debug(`[Satellites] Space-Track: ${records.length} TLEs`);
     return records;
   } catch (err) {
     console.warn('[Satellites] Space-Track failed — falling back to CelesTrak:', err.message);
+    publishSystemStatus(`⚠ SPACETRACK FAILED · FALLING BACK TO CELESTRAK · ${err?.message ?? 'request failed'}`, 'warn', `sat:spacetrack:failed:${err?.message ?? 'unknown'}`);
     return loadCelesTrak();
   }
 }
@@ -197,6 +317,7 @@ async function loadSpaceTrack() {
 async function loadN2YO() {
   if (!N2YO_KEY) {
     console.warn('[Satellites] N2YO API key not set — falling back to CelesTrak.');
+    publishSystemStatus('⚠ N2YO API KEY MISSING · FALLING BACK TO CELESTRAK', 'warn', 'sat:n2yo:key-missing');
     return loadCelesTrak();
   }
   try {
@@ -215,6 +336,7 @@ async function loadN2YO() {
     return records;
   } catch (err) {
     console.warn('[Satellites] N2YO failed — falling back to CelesTrak:', err.message);
+    publishSystemStatus(`⚠ N2YO FAILED · FALLING BACK TO CELESTRAK · ${err?.message ?? 'request failed'}`, 'warn', `sat:n2yo:failed:${err?.message ?? 'unknown'}`);
     return loadCelesTrak();
   }
 }
@@ -245,8 +367,8 @@ function addSatelliteEntity(viewer, name, satrec) {
       positions: trackPositions,
       width:     1,
       material:  new Cesium.PolylineDashMaterialProperty({
-        color:      Cesium.Color.fromCssColorString('#00aaff44'),
-        dashLength: 16,
+        color:      Cesium.Color.fromCssColorString('#00aaff38'),
+        dashLength: 10,
       }),
       arcType:       Cesium.ArcType.NONE,
       clampToGround: false,
@@ -256,22 +378,24 @@ function addSatelliteEntity(viewer, name, satrec) {
   const entity = viewer.entities.add({
     position: initPos,
     point: {
-      pixelSize:       5,
+      pixelSize:       15,
       color:           Cesium.Color.fromCssColorString('#00aaff'),
       outlineColor:    Cesium.Color.fromCssColorString('#003366'),
       outlineWidth:    1,
       scaleByDistance: new Cesium.NearFarScalar(1e5, 2, 1e7, 0.8),
     },
     label: {
-      text:            name,
-      font:            '9px "Share Tech Mono", monospace',
-      fillColor:       Cesium.Color.fromCssColorString('#00aaff'),
-      outlineColor:    Cesium.Color.BLACK,
-      outlineWidth:    2,
-      style:           Cesium.LabelStyle.FILL_AND_OUTLINE,
-      pixelOffset:     new Cesium.Cartesian2(8, -5),
-      scaleByDistance: new Cesium.NearFarScalar(1e5, 1, 1e7, 0),
-      translucencyByDistance: new Cesium.NearFarScalar(1e5, 1, 5e6, 0),
+      text:             name,
+      font:             '24px "Share Tech Mono", monospace',
+      color:           Cesium.Color.fromCssColorString('#00aaff'),
+      outlineColor:    Cesium.Color.fromCssColorString('#003366'),
+      outlineWidth:     2,
+      style:            Cesium.LabelStyle.FILL_AND_OUTLINE,
+      horizontalOrigin: Cesium.HorizontalOrigin.CENTER,
+      verticalOrigin:   Cesium.VerticalOrigin.BOTTOM,
+      pixelOffset:      new Cesium.Cartesian2(0, -30),
+      scaleByDistance:  new Cesium.NearFarScalar(1e5, 1, 1e7, 0),
+      translucencyByDistance: new Cesium.NearFarScalar(1e5, 10, 5e6, 0),
     },
     properties: { type: 'satellite', name, provider: PROVIDER },
   });

@@ -8,9 +8,9 @@ import { initCamera } from './core/camera.js';
 import { initFlights } from './layers/flights.js';
 import { initSatellites } from './layers/satellites.js';
 import { initControls } from './ui/Controls.js';
-import { initHUD } from './ui/HUD.js';
+import { initHUD, updateHUDCounts } from './ui/HUD.js';
 import { initCitySearch } from './ui/citySearch.js';
-import { startClock } from './ui/clock.js';
+// startClock removed — HUD.js owns the UTC clock now
 
 // ── Boot sequence ──────────────────────────────────────────────────────────
 
@@ -53,18 +53,31 @@ async function boot() {
   initControls(viewer, { flights, satellites });
   initHUD(viewer);
   initCitySearch(viewer);
-  startClock();
 
   // Step 6 – Done — hide loading screen
   setProgress(steps[5].pct, steps[5].label);
   await new Promise(r => setTimeout(r, 600));
   document.getElementById('loading').classList.add('hidden');
 
-  // Update entity counter every 5 s
+  // ── Live count feed → HUD status panel ──────────────────────────────────
+  // Push aircraft + satellite + total-object counts every 5 s.
   setInterval(() => {
-    const count = viewer.entities.values.length;
-    document.getElementById('entity-count').textContent = count;
+    const aircraftCount   = flights?.count   ?? 0;
+    const satelliteCount  = satellites?.count ?? 0;
+    const totalObjects    = viewer.entities.values.length;
+    updateHUDCounts({
+      aircraft:   aircraftCount,
+      satellites: satelliteCount,
+      objects:    totalObjects,
+    });
   }, 5000);
+
+  // Fire once immediately so it's not blank at startup
+  updateHUDCounts({
+    aircraft:   flights?.count   ?? 0,
+    satellites: satellites?.count ?? 0,
+    objects:    viewer.entities.values.length,
+  });
 }
 
 boot().catch(err => {

@@ -41,6 +41,12 @@
       height: 100%;
     }
 
+    /* Hide Cesium on-screen credit bar to keep HUD clean. */
+    .cesium-viewer-bottom,
+    .cesium-widget-credits {
+      display: none !important;
+    }
+
     /* ── HUD Shell ──────────────────────────────── */
     #hud {
       position: fixed;
@@ -49,113 +55,10 @@
       z-index: 10;
     }
 
-    /* ── Corner Brackets ────────────────────────── */
-    .corner {
-      position: absolute;
-      width: 28px; height: 28px;
-      opacity: 0.7;
-    }
-    .corner--tl { top: 16px; left: 16px; border-top: 1.5px solid var(--green); border-left: 1.5px solid var(--green); }
-    .corner--tr { top: 16px; right: 16px; border-top: 1.5px solid var(--green); border-right: 1.5px solid var(--green); }
-    .corner--bl { bottom: 16px; left: 16px; border-bottom: 1.5px solid var(--green); border-left: 1.5px solid var(--green); }
-    .corner--br { bottom: 16px; right: 16px; border-bottom: 1.5px solid var(--green); border-right: 1.5px solid var(--green); }
-
-    /* ── Top Bar ────────────────────────────────── */
-    #top-bar {
-      position: absolute;
-      top: 16px; left: 50%; transform: translateX(-50%);
-      display: flex; align-items: center; gap: 24px;
-      font-family: var(--font-ui);
-      font-size: 11px; letter-spacing: 0.15em;
-      text-transform: uppercase;
-      color: var(--green);
-      opacity: 0.85;
-    }
-
-    #city-search-wrap {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      pointer-events: all;
-    }
-
-    #city-search {
-      width: 180px;
-      padding: 5px 8px;
-      background: rgba(0, 0, 0, 0.6);
-      border: 1px solid var(--border);
-      color: var(--green);
-      font-family: var(--font-mono);
-      font-size: 10px;
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
-      outline: none;
-      transition: border-color 0.15s, background 0.15s;
-    }
-
-    #city-search::placeholder {
-      color: rgba(0, 255, 136, 0.45);
-      text-transform: none;
-      letter-spacing: 0.02em;
-    }
-
-    #city-search:focus {
-      border-color: var(--green);
-      background: rgba(0, 32, 20, 0.55);
-    }
-
-    #city-search-btn {
-      padding: 5px 10px;
-      background: rgba(0, 0, 0, 0.6);
-      border: 1px solid var(--border);
-      color: var(--green);
-      font-family: var(--font-ui);
-      font-size: 10px;
-      font-weight: 600;
-      letter-spacing: 0.14em;
-      text-transform: uppercase;
-      cursor: pointer;
-      transition: all 0.15s;
-    }
-
-    #city-search-btn:hover {
-      background: var(--dim);
-      border-color: var(--green);
-    }
-
-    #city-search-status {
-      min-width: 92px;
-      font-size: 9px;
-      letter-spacing: 0.1em;
-      opacity: 0.6;
-      white-space: nowrap;
-      text-transform: uppercase;
-    }
-    #top-bar .logo {
-      font-size: 15px; font-weight: 700; letter-spacing: 0.3em;
-    }
-    #top-bar .divider {
-      width: 1px; height: 16px;
-      background: var(--border);
-    }
-    #clock {
-      font-family: var(--font-mono);
-      font-size: 12px;
-      opacity: 0.9;
-    }
-
-    /* ── Status Ticker ──────────────────────────── */
-    #status-bar {
-      position: absolute;
-      bottom: 24px; left: 50%; transform: translateX(-50%);
-      font-size: 10px; letter-spacing: 0.12em;
-      color: var(--green);
-      opacity: 0.5;
-      font-family: var(--font-ui);
-      text-transform: uppercase;
-    }
-
-    /* ── Left Panel — Layer Toggles ─────────────── */
+    /* ── Corner Brackets — rendered by HUD.js canvas overlay ── */
+    /* ── Top Bar — rendered by HUD.js ──────────────────────── */
+    /* ── Coords Readout — rendered by HUD.js ───────────────── */
+    /* ── Status Bar — rendered by HUD.js ───────────────────── */
     #panel-left {
       position: absolute;
       top: 50%; left: 20px;
@@ -228,15 +131,6 @@
     .shader-btn[data-mode="flir"].active    { background: #ff6600; border-color: #ff6600; color: #000; }
     .shader-btn[data-mode="crt"].active     { background: #ffaa00; border-color: #ffaa00; color: #000; }
     .shader-btn[data-mode="anime"].active   { background: #cc44ff; border-color: #cc44ff; color: #000; }
-
-    /* ── Coords Readout ─────────────────────────── */
-    #coords {
-      position: absolute;
-      bottom: 48px; left: 24px;
-      font-size: 10px; letter-spacing: 0.08em;
-      opacity: 0.6;
-      line-height: 1.8;
-    }
 
     /* ── Loading Screen ─────────────────────────── */
     #loading {
@@ -325,28 +219,10 @@
   <div id="scanlines"></div>
   <div id="nvg-overlay"></div>
 
-  <!-- HUD -->
+  <!-- HUD — dynamic elements injected by HUD.js -->
   <div id="hud">
-    <div class="corner corner--tl"></div>
-    <div class="corner corner--tr"></div>
-    <div class="corner corner--bl"></div>
-    <div class="corner corner--br"></div>
 
-    <div id="top-bar">
-      <span class="logo">WorldView</span>
-      <div class="divider"></div>
-      <span id="clock">--:--:-- UTC</span>
-      <div class="divider"></div>
-      <div id="city-search-wrap">
-        <input id="city-search" type="text" placeholder="Search city or place" autocomplete="off" />
-        <button id="city-search-btn" type="button">Go</button>
-        <span id="city-search-status"></span>
-      </div>
-      <div class="divider"></div>
-      <span class="pulse" id="live-indicator">● LIVE</span>
-    </div>
-
-    <!-- Layer toggles -->
+    <!-- Layer toggles — keep pointer-events for clicks -->
     <div id="panel-left">
       <button class="layer-btn active" data-layer="flights">
         <span class="dot"></span> Air Traffic
@@ -371,16 +247,6 @@
       <button class="shader-btn" data-mode="anime">Anime</button>
     </div>
 
-    <!-- Coords -->
-    <div id="coords">
-      <div id="coord-lat">LAT —</div>
-      <div id="coord-lon">LON —</div>
-      <div id="coord-alt">ALT —</div>
-    </div>
-
-    <div id="status-bar">
-      System nominal · All feeds active · <span id="entity-count">0</span> tracked entities
-    </div>
   </div>
 
   <script type="module" src="/src/main.js"></script>

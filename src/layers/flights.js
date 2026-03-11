@@ -14,7 +14,9 @@ const AIRPLANESLIVE_BASE_URL = '/api/airplaneslive';
 
 const OPENSKY_CLIENT_ID     = import.meta.env.VITE_OPENSKY_CLIENT_ID     ?? '';
 const OPENSKY_CLIENT_SECRET = import.meta.env.VITE_OPENSKY_CLIENT_SECRET ?? '';
-const OPENSKY_TOKEN_URL     = 'https://auth.opensky-network.org/auth/realms/opensky-network/protocol/openid-connect/token';
+// ⚠️  Must go through Vite proxy — auth.opensky-network.org blocks direct browser
+//     fetches with no CORS headers. The /api/opensky-auth proxy rewrites the host.
+const OPENSKY_TOKEN_URL = '/api/opensky-auth/auth/realms/opensky-network/protocol/openid-connect/token';
 
 // ── Aircraft icon SVGs — visually distinct top-down silhouettes ───────────────
 // Each shape is clearly different at a glance. North = up (nose pointing up).
@@ -559,6 +561,99 @@ const ICON_SIZE_PX = {
   generic: 34,
 };
 
+// ── Aircraft type code → asset model filename mapping ────────────────────────
+// Maps ICAO aircraft type codes to their corresponding .glb models in src/assets
+// Examples: B739 → b739.glb, A320 → a320.glb
+// Fallback uses procedural models if specific type is not found
+
+const AIRCRAFT_MODEL_MAP = new Map([
+  // Airbus narrow-body
+  ['A318', 'a318.glb'],
+  ['A319', 'a319.glb'],
+  ['A320', 'a320.glb'],
+  ['A321', 'a321.glb'],
+  // Airbus wide-body
+  ['A332', 'a332.glb'],
+  ['A333', 'a333.glb'],
+  ['A343', 'a343.glb'],
+  ['A346', 'a346.glb'],
+  ['A359', 'a359.glb'],
+  ['A380', 'a380.glb'],
+  // Boeing narrow-body
+  ['B736', 'b736.glb'],
+  ['B737', 'b737.glb'],
+  ['B738', 'b738.glb'],
+  ['B739', 'b739.glb'],
+  // Boeing wide-body
+  ['B744', 'b744.glb'],
+  ['B748', 'b748.glb'],
+  ['B752', 'b752.glb'],
+  ['B753', 'b753.glb'],
+  ['B762', 'b762.glb'],
+  ['B763', 'b763.glb'],
+  ['B764', 'b764.glb'],
+  ['B772', 'b772.glb'],
+  ['B773', 'b773.glb'],
+  ['B788', 'b788.glb'],
+  ['B789', 'b789.glb'],
+  // Other commercial
+  ['ATR42', 'atr42.glb'],
+  ['BAE146', 'bae146.glb'],
+  ['CRJ700', 'crj700.glb'],
+  ['CRJ900', 'crj900.glb'],
+  ['CS100', 'cs100.glb'],
+  ['CS300', 'cs300.glb'],
+  ['E170', 'e170.glb'],
+  ['E190', 'e190.glb'],
+  ['Q400', 'q400.glb'],
+  // Cargo/Military
+  ['AN225', 'an225.gltf'],
+  ['BELUGA', 'beluga.glb'],
+  // General aviation
+  ['PA28', 'pa28.glb'],
+  ['C172', 'pa28.glb'],
+  ['ASK21', 'ask21.glb'],
+]);
+
+/**
+ * Get the 3D model URL for an aircraft type.
+ * First tries to load from /src/assets/{typecode}.glb, then falls back to procedural generation.
+ * @param {string} typecode - ICAO aircraft type code (e.g. 'B739', 'A320')
+ * @param {string} shape - Aircraft shape (jet, helicopter, etc.)
+ * @param {string} color - Hex color code
+ * @returns {string} URL to the model (either asset URL or data: URI for procedural model)
+ */
+function getAircraftModelUrl(typecode, shape, color) {
+  if (!typecode) {
+    // No type code, fall back to procedural
+    return buildGlbUrl(shape, color);
+  }
+
+  const typecodeLower = typecode.toLowerCase();
+  // Try direct match first
+  const assetFilename = AIRCRAFT_MODEL_MAP.get(typecode.toUpperCase()) || 
+                       AIRCRAFT_MODEL_MAP.get(typecode);
+  
+  if (assetFilename) {
+    // Return the asset URL — Vite will handle the import
+    return `/src/assets/${assetFilename}`;
+  }
+
+  // No specific asset found, fall back to procedural model
+  console.debug(`[Flights] No asset model for ${typecode}, using procedural ${shape} model`);
+  return buildGlbUrl(shape, color);
+}
+
+/**
+ * Check if an aircraft type has a 3D model in the assets folder.
+ * @param {string} typecode - ICAO aircraft type code
+ * @returns {boolean} True if an asset model exists for this type
+ */
+export function hasAssetModel(typecode) {
+  if (!typecode) return false;
+  return AIRCRAFT_MODEL_MAP.has(typecode.toUpperCase());
+}
+
 
 // ── State ─────────────────────────────────────────────────────────────────────
 
@@ -570,6 +665,9 @@ let enabled     = true;
 let oskToken    = null;
 let oskTokenExp = 0;
 let hideAllFlatIcons = false;
+let flightFeedHealthy = true;
+let hasPublishedFlightOk = false;
+let lastFlightStatusKey = '';
 
 const EARTH_RADIUS_M = 6378137;
 const KTS_TO_MPS = 0.514444;
@@ -579,6 +677,23 @@ const MAX_PREDICT_SECONDS = 45;
 function iconRotationFromHeading(headingDeg = 0) {
   // Billboard rotation is clockwise from north when alignedAxis is UNIT_Z.
   return Cesium.Math.toRadians(-(headingDeg ?? 0));
+}
+
+function publishSystemStatus(msg, level = 'ok', key = `${level}:${msg}`) {
+  if (lastFlightStatusKey === key) return;
+  lastFlightStatusKey = key;
+  if (typeof window === 'undefined') return;
+
+  const ts = Date.now();
+  window.__worldviewSystemStatus = { msg, level, key, source: 'flights', ts };
+  window.__worldviewSubsystemStatus = {
+    ...(window.__worldviewSubsystemStatus ?? {}),
+    flights: { msg, level, key, ts },
+  };
+
+  window.dispatchEvent(new CustomEvent('worldview:system-status', {
+    detail: { msg, level, source: 'flights', key, ts },
+  }));
 }
 
 function applyFlatIconVisibility() {
@@ -596,6 +711,20 @@ function applyFlatIconVisibility() {
 
 export async function initFlights(viewer) {
   console.info(`[Flights] Provider: ${PROVIDER}`);
+
+  // Defer the first fetch until the camera finishes its opening flyTo — before
+  // that, getViewportBounds() returns null and providers reject lat/0/lon/0.
+  // We wait for the camera's moveEnd event (fires when flyTo completes), with a
+  // 6 s safety timeout in case the event never fires (e.g. no animation).
+  await new Promise(resolve => {
+    const timeout = setTimeout(resolve, 6000);
+    viewer.camera.moveEnd.addEventListener(function onMoveEnd() {
+      viewer.camera.moveEnd.removeEventListener(onMoveEnd);
+      clearTimeout(timeout);
+      resolve();
+    });
+  });
+
   await fetchAndRender(viewer);
   setInterval(() => { if (enabled) fetchAndRender(viewer); }, POLL_MS);
 
@@ -637,34 +766,52 @@ export function setFollowMode(icaoHex, active) {
     const category = entity.properties?.category?.getValue?.() ?? '';
     const typecode = entity.properties?.typecode?.getValue?.() ?? '';
     const shape    = getShape({ category, typecode });
-    const glbUrl   = buildGlbUrl(shape, color);
+    
+    // Get model URL: uses asset if available, falls back to procedural
+    const modelUrl = getAircraftModelUrl(typecode, shape, color);
+    
+    // Determine if this is an asset model or procedural model
+    const isAssetModel = modelUrl.startsWith('/src/assets/');
+    
     const scale    = MODEL_SCALE[shape] ?? MODEL_SCALE.generic;
     const cesColor = Cesium.Color.fromCssColorString(color);
 
-    // Build the HeadingPitchRoll orientation from stored heading
-    const heading = entity.properties?.heading?.getValue?.() ?? 0;
-    const pos     = entity.position?.getValue?.(Cesium.JulianDate.now());
-    if (pos) {
-      const hpr         = new Cesium.HeadingPitchRoll(Cesium.Math.toRadians(heading), 0, 0);
-      entity.orientation = new Cesium.ConstantProperty(
-        Cesium.Transforms.headingPitchRollQuaternion(pos, hpr)
-      );
-    }
+    // Create dynamic orientation property that continuously follows heading as aircraft updates
+    entity.orientation = new Cesium.CallbackProperty(() => {
+      const heading = entity.properties?.heading?.getValue?.() ?? 0;
+      const pos     = entity.position?.getValue?.(Cesium.JulianDate.now());
+      if (pos) {
+        // Asset models need 90° offset to correct their axis orientation
+        const headingOffset = isAssetModel ? 90 : 0;
+        const hpr = new Cesium.HeadingPitchRoll(Cesium.Math.toRadians(heading + headingOffset), 0, 0);
+        return Cesium.Transforms.headingPitchRollQuaternion(pos, hpr);
+      }
+      return Cesium.Quaternion.IDENTITY;
+    }, false);
 
     // Attach the 3-D model and hide the flat SVG icon
-    entity.model = new Cesium.ModelGraphics({
-      uri:              new Cesium.ConstantProperty(glbUrl),
+    // Asset models: use original colors from the model (no tinting)
+    // Procedural models: apply military/commercial/other classification colors
+    const modelGraphicsProps = {
+      uri:              new Cesium.ConstantProperty(modelUrl),
       scale:            new Cesium.ConstantProperty(scale),
       maximumScale:     new Cesium.ConstantProperty(scale),
       minimumPixelSize: new Cesium.ConstantProperty(12),
-      color:            new Cesium.ConstantProperty(cesColor),
-      colorBlendMode:   new Cesium.ConstantProperty(Cesium.ColorBlendMode.MIX),
-      colorBlendAmount: new Cesium.ConstantProperty(0.5),
       shadows:          new Cesium.ConstantProperty(Cesium.ShadowMode.DISABLED),
       silhouetteColor:  new Cesium.ConstantProperty(Cesium.Color.BLACK),
       silhouetteSize:   new Cesium.ConstantProperty(1.0),
       show:             new Cesium.ConstantProperty(true),
-    });
+    };
+    
+    // Only apply color tinting to procedural models (asset models keep their original colors)
+    if (!isAssetModel) {
+      modelGraphicsProps.color            = new Cesium.ConstantProperty(cesColor);
+      modelGraphicsProps.colorBlendMode   = new Cesium.ConstantProperty(Cesium.ColorBlendMode.MIX);
+      modelGraphicsProps.colorBlendAmount = new Cesium.ConstantProperty(0.5);
+    }
+
+    entity.model = new Cesium.ModelGraphics(modelGraphicsProps);
+    
     if (entity.billboard) entity.billboard.show = new Cesium.ConstantProperty(false);
     if (entity.label) entity.label.show = new Cesium.ConstantProperty(false);
     applyFlatIconVisibility();
@@ -703,8 +850,18 @@ async function fetchAndRender(viewer) {
     const bounds   = getViewportBounds(viewer);
     const aircraft = await fetchAircraft(bounds);
     renderAircraft(viewer, aircraft);
+
+    if (!flightFeedHealthy) {
+      publishSystemStatus(`● FLIGHT FEED RECOVERED · ${PROVIDER.toUpperCase()}`, 'ok', `flights:recovered:${PROVIDER}`);
+    } else if (!hasPublishedFlightOk) {
+      publishSystemStatus(`● FLIGHT FEED OK · ${PROVIDER.toUpperCase()}`, 'ok', `flights:ok:${PROVIDER}`);
+      hasPublishedFlightOk = true;
+    }
+    flightFeedHealthy = true;
   } catch (err) {
     console.warn(`[Flights] Fetch failed (${PROVIDER}):`, err.message);
+    publishSystemStatus(`⚠ FLIGHT FEED ERROR · ${PROVIDER.toUpperCase()} · ${err?.message ?? 'request failed'}`, 'error', `flights:error:${PROVIDER}:${err?.message ?? 'unknown'}`);
+    flightFeedHealthy = false;
   }
 }
 
@@ -715,6 +872,7 @@ async function fetchAircraft(bounds) {
         return await fetchReadsbLike(AIRPLANESLIVE_BASE_URL, bounds, 'airplanes.live');
       } catch (err) {
         console.warn('[Flights] airplanes.live unavailable, falling back to adsb.lol:', err.message);
+        publishSystemStatus('⚠ AIRPLANES.LIVE UNAVAILABLE · USING ADSB.LOL FALLBACK', 'warn', 'flights:airplaneslive-fallback');
         return fetchReadsbLike(ADSBOOL_BASE_URL, bounds, 'adsb.lol');
       }
     }
@@ -757,13 +915,36 @@ function boundsToQueryCenter(bounds) {
 }
 
 async function fetchReadsbLike(baseUrl, bounds, providerLabel) {
-  const query = boundsToQueryCenter(bounds) ?? { lat: 0, lon: 0, distNm: 250 };
-  const url = `${baseUrl}/v2/lat/${query.lat.toFixed(4)}/lon/${query.lon.toFixed(4)}/dist/${query.distNm}`;
+  const query = boundsToQueryCenter(bounds);
+  // If bounds aren't available yet (camera still initialising), skip this cycle
+  // rather than sending lat/0/lon/0 which most providers reject with 404.
+  if (!query) return [];
 
-  const resp = await fetch(url);
-  if (!resp.ok) throw new Error(`${providerLabel} ${resp.status}`);
+  // Provider compatibility: some READSB-style APIs use /v2/lat/.../lon/.../dist/...
+  // while others expose /v2/point/{lat}/{lon}/{dist}. Try both before failing.
+  const candidateUrls = [
+    `${baseUrl}/v2/lat/${query.lat.toFixed(4)}/lon/${query.lon.toFixed(4)}/dist/${query.distNm}`,
+    `${baseUrl}/v2/point/${query.lat.toFixed(4)}/${query.lon.toFixed(4)}/${query.distNm}`,
+  ];
 
-  const data = await resp.json();
+  let data = null;
+  let lastError = null;
+  for (const url of candidateUrls) {
+    try {
+      const resp = await fetch(url);
+      if (!resp.ok) {
+        lastError = new Error(`${providerLabel} ${resp.status}`);
+        continue;
+      }
+      data = await resp.json();
+      break;
+    } catch (err) {
+      lastError = err;
+    }
+  }
+
+  if (!data) throw lastError ?? new Error(`${providerLabel} unavailable`);
+
   const aircraft = data.aircraft ?? data.ac ?? [];
 
   const numOr = (v, fallback = 0) => {
@@ -962,7 +1143,10 @@ function renderAircraft(viewer, aircraft) {
       const entity = entityMap.get(a.id);
       entity.position = getTrackPositionProperty(a.id);
       if (entity.billboard) {
-        entity.billboard.image    = new Cesium.ConstantProperty(icon);
+        // Check if this aircraft is currently selected (has glow enabled)
+        const useGlow = selectedFlightId === a.id;
+        const iconToUse = useGlow ? buildGlowSvgUri(shape, color) : icon;
+        entity.billboard.image    = new Cesium.ConstantProperty(iconToUse);
         entity.billboard.width    = new Cesium.ConstantProperty(iconSizePx);
         entity.billboard.height   = new Cesium.ConstantProperty(iconSizePx);
         entity.billboard.rotation = new Cesium.ConstantProperty(iconRotationFromHeading(a.heading));
@@ -1037,4 +1221,111 @@ function renderAircraft(viewer, aircraft) {
   }
 
   console.info(`[Flights] Rendering ${entityMap.size} aircraft`);
+}
+
+// ── Glow effect for selected flight ───────────────────────────────────────────
+
+let selectedFlightId = null;
+const glowSvgCache = new Map();
+
+function getContrastingGlowColor(fillColor) {
+  // Return a contrasting color for the glow based on the fill color
+  const colorMap = {
+    '#f44336': '#00ff88', // military red → bright green
+    '#00e676': '#ff8800', // commercial green → orange
+    '#ffa726': '#00b8ff', // other orange → cyan
+  };
+  return colorMap[fillColor] || '#00ff88'; // default to bright green
+}
+
+function buildGlowSvgUri(shape, color) {
+  const key = `${shape}:${color}:glow`;
+  if (glowSvgCache.has(key)) return glowSvgCache.get(key);
+
+  const glowCol = getContrastingGlowColor(color);
+  const rawSvg  = SHAPES[shape] ?? SHAPES.generic;
+
+  // Extract transform from original
+  const gTagMatch = rawSvg.match(/<g([^>]*)>/);
+  const rawAttribs = gTagMatch ? gTagMatch[1] : ' transform="translate(50,50)"';
+  const xformMatch = rawAttribs.match(/transform="([^"]+)"/);
+  const xform      = xformMatch ? ` transform="${xformMatch[1]}"` : '';
+
+  const innerMatch = rawSvg.match(/<g[^>]*>([\s\S]*?)<\/g>/);
+  const inner      = innerMatch ? innerMatch[1] : '';
+
+  const vb = (rawSvg.match(/viewBox="([^"]+)"/) || [])[1] || '0 0 100 100';
+  const w  = 320;
+  const h  = 320;
+
+  // Create animated glow with pulsing effect
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${vb}" width="${w}" height="${h}">
+  <defs>
+    <style>
+      @keyframes pulse-glow {
+        0%, 100% { r: 50%; opacity: 0.4; }
+        50% { r: 65%; opacity: 0.8; }
+      }
+    </style>
+    <filter id="glow-filter" x="-100%" y="-100%" width="300%" height="300%">
+      <feGaussianBlur stdDeviation="3" result="coloredBlur"/>
+      <feMerge>
+        <feMergeNode in="coloredBlur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+  <!-- Animated pulsing glow rings -->
+  <circle cx="50" cy="50" r="40" fill="none" stroke="${glowCol}" stroke-width="2" opacity="0.6">
+    <animate attributeName="r" values="40;55;40" dur="1.5s" repeatCount="indefinite"/>
+    <animate attributeName="opacity" values="0.8;0.2;0.8" dur="1.5s" repeatCount="indefinite"/>
+  </circle>
+  <circle cx="50" cy="50" r="35" fill="none" stroke="${glowCol}" stroke-width="1.5" opacity="0.4">
+    <animate attributeName="r" values="35;50;35" dur="2s" repeatCount="indefinite"/>
+    <animate attributeName="opacity" values="0.6;0.15;0.6" dur="2s" repeatCount="indefinite"/>
+  </circle>
+  <!-- Aircraft shape with enhanced glow -->
+  <g${xform} fill="${color}" stroke="${glowCol}" stroke-width="2.5" stroke-linejoin="round" filter="url(#glow-filter)">${inner}</g>
+</svg>`;
+
+  const uri = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
+  glowSvgCache.set(key, uri);
+  return uri;
+}
+
+export function setFlightGlow(icaoHex, active) {
+  const id = icaoHex.toLowerCase();
+  const entity = entityMap.get(id);
+  if (!entity) return;
+
+  if (active) {
+    selectedFlightId = id;
+    // Get current color and shape from stored properties
+    const dbFlags  = entity.properties?.dbFlags?.getValue?.() ?? 0;
+    const callsign = entity.properties?.callsign?.getValue?.() ?? '';
+    const color    = aircraftColor({ dbFlags, callsign });
+    const category = entity.properties?.category?.getValue?.() ?? '';
+    const typecode = entity.properties?.typecode?.getValue?.() ?? '';
+    const shape    = getShape({ category, typecode });
+
+    // Build glowing SVG and apply it
+    const glowIcon = buildGlowSvgUri(shape, color);
+    if (entity.billboard) {
+      entity.billboard.image = new Cesium.ConstantProperty(glowIcon);
+    }
+  } else {
+    if (selectedFlightId === id) selectedFlightId = null;
+    // Restore normal icon
+    const dbFlags  = entity.properties?.dbFlags?.getValue?.() ?? 0;
+    const callsign = entity.properties?.callsign?.getValue?.() ?? '';
+    const color    = aircraftColor({ dbFlags, callsign });
+    const category = entity.properties?.category?.getValue?.() ?? '';
+    const typecode = entity.properties?.typecode?.getValue?.() ?? '';
+    const shape    = getShape({ category, typecode });
+
+    const normalIcon = buildSvgUri(shape, color);
+    if (entity.billboard) {
+      entity.billboard.image = new Cesium.ConstantProperty(normalIcon);
+    }
+  }
 }

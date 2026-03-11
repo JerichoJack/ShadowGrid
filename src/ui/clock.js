@@ -1,17 +1,6 @@
 /**
- * ui/clock.js
- * Updates the UTC clock in the top HUD bar every second.
+ * ui/clock.js  —  STUB
+ * Clock is now owned by HUD.js. This file is kept to avoid breaking
+ * any legacy imports but does nothing.
  */
-
-export function startClock() {
-  function tick() {
-    const now = new Date();
-    const hh  = now.getUTCHours()  .toString().padStart(2,'0');
-    const mm  = now.getUTCMinutes().toString().padStart(2,'0');
-    const ss  = now.getUTCSeconds().toString().padStart(2,'0');
-    const el  = document.getElementById('clock');
-    if (el) el.textContent = `${hh}:${mm}:${ss} UTC`;
-  }
-  tick();
-  setInterval(tick, 1000);
-}
+export function startClock() { /* no-op — HUD.js owns the clock */ }

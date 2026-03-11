@@ -50,19 +50,36 @@ export default defineConfig({
       '/api/celestrak': {
         target:       'https://celestrak.org',
         changeOrigin: true,
-        timeout:      30000,
-        proxyTimeout: 30000,
+        timeout:      15000,
+        proxyTimeout: 15000,
         rewrite:      path => path.replace(/^\/api\/celestrak/, ''),
         onError:      (err, req, res) => {
           console.error('[proxy] CelesTrak error:', err.message);
-          res.writeHead(500, { 'Content-Type': 'text/plain' });
-          res.end('CelesTrak proxy timeout or unavailable');
+          res.writeHead(502, { 'Content-Type': 'text/plain' });
+          res.end('CelesTrak proxy timeout or unavailable — client will try direct fetch');
         },
       },
       '/api/spacetrack': {
-        target:      'https://www.space-track.org',
+        target:            'https://www.space-track.org',
+        changeOrigin:      true,
+        cookieDomainRewrite: 'localhost',
+        rewrite:           path => path.replace(/^\/api\/spacetrack/, ''),
+      },
+
+      // ── OpenSky OAuth2 token endpoint ───────────────────────────────────────
+      // auth.opensky-network.org sends no CORS headers — must proxy.
+      '/api/opensky-auth': {
+        target:      'https://auth.opensky-network.org',
         changeOrigin: true,
-        rewrite:     path => path.replace(/^\/api\/spacetrack/, ''),
+        rewrite:     path => path.replace(/^\/api\/opensky-auth/, ''),
+      },
+
+      // ── N2YO satellite API ──────────────────────────────────────────────────
+      // api.n2yo.com sends no CORS headers — must proxy.
+      '/api/n2yo': {
+        target:      'https://api.n2yo.com',
+        changeOrigin: true,
+        rewrite:     path => path.replace(/^\/api\/n2yo/, ''),
       },
     },
   },
