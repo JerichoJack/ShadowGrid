@@ -5,16 +5,87 @@
 
 let currentMode = 'normal';
 
+// Track collapsed state for filter containers
+const filterCollapsedState = new Map();
+
 export function initControls(viewer, layers) {
   // ── Layer toggles ────────────────────────────────────────────────────────
   document.querySelectorAll('.layer-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', (e) => {
+      // Check if click was on the collapse chevron
+      const chevron = btn.querySelector('.collapse-chevron');
+      if (e.target === chevron) {
+        e.stopPropagation();
+        const layerName = btn.dataset.layer;
+        const filterContainer = btn.nextElementSibling;
+        if (filterContainer?.classList.contains('filter-container')) {
+          const isCollapsed = filterContainer.classList.toggle('collapsed');
+          filterCollapsedState.set(layerName, isCollapsed);
+        }
+        return;
+      }
+
       const layerName = btn.dataset.layer;
-      const isActive  = btn.classList.toggle('active');
+      const isActive = btn.classList.toggle('active');
       btn.classList.toggle('inactive', !isActive);
 
       const layer = layers[layerName];
       if (layer?.setEnabled) layer.setEnabled(isActive);
+
+      // Show/hide filter container for this layer
+      const filterContainer = btn.nextElementSibling;
+      if (filterContainer?.classList.contains('filter-container')) {
+        filterContainer.classList.toggle('visible', isActive);
+        btn.classList.toggle('has-filters', isActive);
+        // Keep the collapsed state if it was set previously
+        if (!filterCollapsedState.has(layerName)) {
+          filterCollapsedState.set(layerName, true); // Start collapsed by default
+          filterContainer.classList.add('collapsed');
+        }
+      }
+    });
+  });
+
+  // ── Classification/type filters ──────────────────────────────────────────
+  document.querySelectorAll('.filter-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      
+      const filterSpec = btn.dataset.filter; // e.g., "satellites:military" or "flights-classification:military"
+      let layerName, filterType, filterCategory;
+      
+      // Handle new format: "flights-classification:military" or "satellites:military"
+      if (filterSpec.includes('-')) {
+        const parts = filterSpec.split(':');
+        const prefix = parts[0]; // e.g., "flights-classification"
+        filterType = parts[1]; // e.g., "military"
+        
+        if (prefix === 'flights-classification') {
+          layerName = 'flights';
+          filterCategory = 'classification';
+        } else if (prefix === 'flights-type') {
+          layerName = 'flights';
+          filterCategory = 'type';
+        }
+      } else {
+        // Old satellite format: "satellites:military"
+        const parts = filterSpec.split(':');
+        layerName = parts[0];
+        filterType = parts[1];
+      }
+      
+      const isActive = btn.classList.toggle('active');
+      btn.classList.toggle('inactive', !isActive);
+
+      const layer = layers[layerName];
+      if (layerName === 'flights' && filterCategory === 'classification') {
+        layer?.setAircraftClassificationFilter?.(filterType, isActive);
+      } else if (layerName === 'flights' && filterCategory === 'type') {
+        layer?.setAircraftTypeFilter?.(filterType, isActive);
+      } else {
+        // Satellites classification filter
+        layer?.setClassificationFilter?.(filterType, isActive);
+      }
     });
   });
 

@@ -43,10 +43,12 @@ async function boot() {
   // Step 3 – Flights
   setProgress(steps[2].pct, steps[2].label);
   const flights = await initFlights(viewer);
+  flights?.setEnabled(false);  // Start with flights hidden
 
   // Step 4 – Satellites
   setProgress(steps[3].pct, steps[3].label);
   const satellites = await initSatellites(viewer);
+  satellites?.setEnabled(false);  // Start with satellites hidden
 
   // Step 5 – UI
   setProgress(steps[4].pct, steps[4].label);

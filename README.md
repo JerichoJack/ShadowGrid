@@ -44,7 +44,7 @@ Set `VITE_MAP_PROVIDER` in your `.env` to switch instantly — no code changes r
 
 | Provider | Visual Quality | Cost | Credit Card? | Notes |
 |---|---|---|---|---|
-| `cesium` | ⭐⭐ Terrain + Bing satellite + OSM buildings | 100% free | ❌ No | **Recommended default** |
+| `cesium` | ⭐⭐ Terrain + Bing satellite + OSM buildings | 100% free | ❌ No | **Recommended default, but currently unreachable** |
 | `google` | ⭐⭐⭐ Photogrammetric city models | Free tier ($200/mo credit) | ✅ Required | Best possible visuals; falls back to `cesium` if key is missing |
 | `maptiler` | ⭐⭐ Quantized-mesh terrain + satellite | 100% free tier | ❌ No | Falls back to `cesium` if key is missing |
 
@@ -178,7 +178,13 @@ VITE_SATELLITE_PROVIDER=celestrak
 npm start
 ```
 
-Open [http://localhost:5173](http://localhost:5173)
+or:
+
+```bash
+npm run dev -- --host
+```
+
+Open [http://localhost:5173](http://localhost:5173) or your local network IP (e.g. `http://192.168.1.100:5173`) to view on network devices.
 
 ---
 

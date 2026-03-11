@@ -620,7 +620,9 @@ function initEntityPicker(viewer) {
 
     if (type === 'flight') {
       const icao     = (props.icao?.getValue() ?? String(entity.id).replace('flight-','')).toUpperCase();
-      const callsign = (props.callsign?.getValue() ?? '').trim() || icao;
+      const rawCallsign = (props.callsign?.getValue() ?? '').trim();
+      // Don't fall back to ICAO hex — use it for display only if no real callsign
+      const callsign = rawCallsign || icao;
       const altFt    = props.altFt?.getValue() ?? 0;
       const kts      = props.kts?.getValue()   ?? 0;
       const heading  = props.heading?.getValue() ?? 0;
@@ -643,8 +645,8 @@ function initEntityPicker(viewer) {
       renderPanel(panel, { icao, callsign, altFt, kts, heading, squawk, vert, provider, dbFlags,
         typecode: liveTypecode, loading: true }, viewer, entity);
 
-      // Fetch enrichment in background
-      const info = await fetchAircraftInfo(icao.toLowerCase(), callsign);
+      // Fetch enrichment in background — pass null callsign if we only have the ICAO hex
+      const info = await fetchAircraftInfo(icao.toLowerCase(), rawCallsign || null);
       // Keep live typecode if enrichment didn't return one
       if (!info.typecode && liveTypecode) info.typecode = liveTypecode;
       renderPanel(panel, { icao, callsign, altFt, kts, heading, squawk, vert, provider, dbFlags, ...info }, viewer, entity);
@@ -655,10 +657,14 @@ function initEntityPicker(viewer) {
         setFlightGlow(currentSelectedFlightId, false);
         currentSelectedFlightId = null;
       }
-      const name     = props.name?.getValue() ?? entity.id;
-      const provider = (props.provider?.getValue() ?? 'celestrak').toUpperCase();
+      const name         = props.name?.getValue() ?? entity.id;
+      const provider     = (props.provider?.getValue() ?? 'celestrak').toUpperCase();
+      const isMilitary   = props.isMilitary?.getValue() ?? false;
+      const orbitType    = props.orbitType?.getValue() ?? 'Unknown';
+      const application  = props.application?.getValue() ?? 'Unknown';
+      const crewedStatus = props.crewedStatus?.getValue() ?? 'Unknown';
       panel.style.display = 'block';
-      panel.innerHTML = satelliteHtml(name, provider);
+      panel.innerHTML = satelliteHtml({ name, provider, isMilitary, orbitType, application, crewedStatus });
       wireFollowButton(panel, viewer, entity, name, 'satellite');
       wirePanelClose(panel);
     }
@@ -736,7 +742,12 @@ async function fetchAircraftInfo(icao, callsign) {
   if (callsign && callsign.length >= 4) {
     // Validate callsign is in airline format: 2-3 letters + 1-4 digits (+ optional letter)
     // Valid: UAL123, BAW456, RYR22A, Invalid: 405LP, N404LP, TEST
-    const isAirlineCallsign = /^[A-Z]{2,3}\d{1,4}[A-Z]?$/.test(callsign);
+    // Airline callsigns are 2-3 letters + 1-4 digits + optional suffix letter.
+    // Also reject 6-char hex-looking strings (e.g. ICAO addresses like CEF05F)
+    // by requiring at least one non-hex digit (G-Z range) in the letter prefix.
+    const isAirlineCallsign = /^[A-Z]{2,3}\d{1,4}[A-Z]?$/.test(callsign)
+      && callsign.length <= 8
+      && !/^[0-9A-F]{6}$/i.test(callsign);
     
     if (isAirlineCallsign) {
       const cached = routeCache.get(callsign);
@@ -926,18 +937,22 @@ function setFollowBtnState(btn, active) {
   }
 }
 
-function satelliteHtml(name, provider) {
+function satelliteHtml({ name, provider, isMilitary, orbitType, application, crewedStatus }) {
+  const militaryBadge = isMilitary ? '<span style="color:#ff3b30;font-weight:bold">[MILITARY]</span> ' : '';
   return `
     <div style="background:rgba(0,170,255,0.1);padding:12px 16px;border-bottom:1px solid rgba(0,170,255,0.2)">
       <div style="display:flex;align-items:center;gap:10px">
         <span style="font-size:18px">◈</span>
-        <div style="font-size:14px;font-weight:bold;letter-spacing:0.1em;color:#00aaff">${name}</div>
+        <div style="font-size:14px;font-weight:bold;letter-spacing:0.1em;color:#00aaff">${militaryBadge}${name}</div>
         <div style="margin-left:auto;cursor:pointer;opacity:0.5" id="panel-close">✕</div>
       </div>
     </div>
     <div style="padding:12px 16px;font-size:11px">
       <div style="opacity:0.6;margin-bottom:10px">
         Orbital tracking active<br>
+        Orbit: <span style="opacity:0.9">${orbitType}</span><br>
+        Application: <span style="opacity:0.9">${application}</span><br>
+        Crewed: <span style="opacity:0.9">${crewedStatus}</span><br>
         <span style="opacity:0.5;font-size:9px">TLE · ${provider}</span>
       </div>
       <button id="follow-btn" style="

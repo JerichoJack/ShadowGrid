@@ -225,7 +225,7 @@ const MILITARY_HEX_PREFIXES = [
   '43c',          // United Kingdom military
   '3f4',          // Germany military
   '3a0',          // France military (Armée de l'air)
-  '461',          // Russia military
+  // NOTE: '461' removed — this is Finland's civil ICAO block (460000–46FFFF), NOT Russia
   '7001', '7002', // China military
   '710',          // Japan JASDF
   '7c0',          // Australia military
@@ -661,13 +661,41 @@ export function hasAssetModel(typecode) {
 const entityMap = new Map();
 const trackStateMap = new Map();
 const trackPosPropMap = new Map();
-let enabled     = true;
+let enabled     = false;  // Start disabled by default
 let oskToken    = null;
 let oskTokenExp = 0;
 let hideAllFlatIcons = false;
 let flightFeedHealthy = true;
 let hasPublishedFlightOk = false;
 let lastFlightStatusKey = '';
+
+// Aircraft classification filter state — all enabled by default
+const aircraftClassificationFilters = {
+  military: true,
+  commercial: true,
+  other: true,
+};
+
+// Aircraft type filter state — all enabled by default
+const aircraftTypeFilters = {
+  heavy: true,
+  widebody: true,
+  jet: true,
+  turboprop: true,
+  helicopter: true,
+  light: true,
+  generic: true,
+};
+
+/**
+ * Determine if a flight entity should be visible based on enabled state and filters
+ */
+function shouldShowFlight(aircraftClassification, aircraftType) {
+  if (!enabled) return false;
+  const classKey = (aircraftClassification ?? 'other').toLowerCase();
+  const typeKey = (aircraftType ?? 'generic').toLowerCase();
+  return aircraftClassificationFilters[classKey] && aircraftTypeFilters[typeKey];
+}
 
 const EARTH_RADIUS_M = 6378137;
 const KTS_TO_MPS = 0.514444;
@@ -697,12 +725,16 @@ function publishSystemStatus(msg, level = 'ok', key = `${level}:${msg}`) {
 }
 
 function applyFlatIconVisibility() {
-  for (const [, entity] of entityMap) {
+  for (const [id, entity] of entityMap) {
+    const state = trackStateMap.get(id);
+    const aircraftType = state?.aircraftType ?? 'generic';
+    const aircraftClassification = state?.aircraftClassification ?? 'other';
+    const shouldShow = shouldShowFlight(aircraftClassification, aircraftType) && !hideAllFlatIcons;
     if (entity.billboard) {
-      entity.billboard.show = new Cesium.ConstantProperty(enabled && !hideAllFlatIcons);
+      entity.billboard.show = new Cesium.ConstantProperty(shouldShow);
     }
     if (entity.label) {
-      entity.label.show = new Cesium.ConstantProperty(enabled && !hideAllFlatIcons);
+      entity.label.show = new Cesium.ConstantProperty(shouldShow);
     }
   }
 }
@@ -741,8 +773,41 @@ export async function initFlights(viewer) {
   return {
     setEnabled(val) {
       enabled = val;
-      entityMap.forEach(e => { e.show = val; });
+      entityMap.forEach((e, icaoHex) => {
+        const state = trackStateMap.get(icaoHex);
+        const aircraftType = state?.aircraftType ?? 'generic';
+        const aircraftClassification = state?.aircraftClassification ?? 'other';
+        e.show = shouldShowFlight(aircraftClassification, aircraftType);
+      });
       applyFlatIconVisibility();
+    },
+    setAircraftClassificationFilter(classification, filterEnabled) {
+      const classKey = (classification ?? 'other').toLowerCase();
+      if (classKey in aircraftClassificationFilters) {
+        aircraftClassificationFilters[classKey] = filterEnabled;
+        // Update visibility of all entities
+        entityMap.forEach((e, icaoHex) => {
+          const state = trackStateMap.get(icaoHex);
+          const aircraftType = state?.aircraftType ?? 'generic';
+          const aircraftClassification = state?.aircraftClassification ?? 'other';
+          e.show = shouldShowFlight(aircraftClassification, aircraftType);
+        });
+        applyFlatIconVisibility();
+      }
+    },
+    setAircraftTypeFilter(aircraftType, filterEnabled) {
+      const typeKey = (aircraftType ?? 'generic').toLowerCase();
+      if (typeKey in aircraftTypeFilters) {
+        aircraftTypeFilters[typeKey] = filterEnabled;
+        // Update visibility of all entities
+        entityMap.forEach((e, icaoHex) => {
+          const state = trackStateMap.get(icaoHex);
+          const acType = state?.aircraftType ?? 'generic';
+          const acClassification = state?.aircraftClassification ?? 'other';
+          e.show = shouldShowFlight(acClassification, acType);
+        });
+        applyFlatIconVisibility();
+      }
     },
     get count()    { return entityMap.size; },
     get provider() { return PROVIDER; },
@@ -1058,7 +1123,11 @@ async function getOpenSkyToken() {
 }
 
 function updateTrackState(id, a) {
+  const shape = getShape(a);  // Get the aircraft shape/type
+  const classification = classifyAircraft(a);  // Get military/commercial/other
   trackStateMap.set(id, {
+    aircraftType: shape,  // Store aircraft type for filtering
+    aircraftClassification: classification,  // Store classification for filtering
     latRad: Cesium.Math.toRadians(a.lat),
     lonRad: Cesium.Math.toRadians(a.lon),
     altM: Math.max(0, a.altFt * 0.3048),
@@ -1135,6 +1204,7 @@ function renderAircraft(viewer, aircraft) {
     const altMetres = a.altFt * 0.3048;
     const color     = aircraftColor(a);
     const shape     = getShape(a);
+    const classification = classifyAircraft(a);  // Get classification for visibility
     const icon      = buildSvgUri(shape, color);
     const iconSizePx = ICON_SIZE_PX[shape] ?? ICON_SIZE_PX.generic;
     const cesColor  = Cesium.Color.fromCssColorString(color);
@@ -1142,6 +1212,8 @@ function renderAircraft(viewer, aircraft) {
     if (entityMap.has(a.id)) {
       const entity = entityMap.get(a.id);
       entity.position = getTrackPositionProperty(a.id);
+      // Re-check visibility on every update to respect current filters
+      entity.show = shouldShowFlight(classification, shape);
       if (entity.billboard) {
         // Check if this aircraft is currently selected (has glow enabled)
         const useGlow = selectedFlightId === a.id;
@@ -1162,11 +1234,13 @@ function renderAircraft(viewer, aircraft) {
         setProp(entity.properties, 'vert', a.vert);
         setProp(entity.properties, 'category', a.category);
         setProp(entity.properties, 'typecode', a.typecode);
+        setProp(entity.properties, 'classification', classification);
       }
     } else {
       const entity = viewer.entities.add({
         id:       `flight-${a.id}`,
         position: getTrackPositionProperty(a.id),
+        show:     shouldShowFlight(classification, shape),  // Initialize based on both filters
         billboard: {
           image:                    icon,
           width:                    iconSizePx,
@@ -1176,7 +1250,7 @@ function renderAircraft(viewer, aircraft) {
           scaleByDistance:          new Cesium.NearFarScalar(1e3, 1.6, 8e6, 0.65),
           color:                    Cesium.Color.WHITE,
           disableDepthTestDistance: 5e6,
-          show:                     enabled && !hideAllFlatIcons,
+          show:                     shouldShowFlight(classification, shape) && !hideAllFlatIcons,
         },
         label: {
           text:                     a.callsign || a.id.toUpperCase(),
@@ -1189,21 +1263,22 @@ function renderAircraft(viewer, aircraft) {
           scaleByDistance:          new Cesium.NearFarScalar(1e3, 1.0, 3e6, 0),
           translucencyByDistance:   new Cesium.NearFarScalar(1e3, 1.0, 2e6, 0),
           disableDepthTestDistance: 5e6,
-          show:                     enabled && !hideAllFlatIcons,
+          show:                     shouldShowFlight(classification, shape) && !hideAllFlatIcons,
         },
         properties: {
-          type:     'flight',
-          icao:     a.id,
-          callsign: a.callsign,
-          altFt:    a.altFt,
-          kts:      a.kts,
-          heading:  a.heading,
-          squawk:   a.squawk,
-          dbFlags:  a.dbFlags,
-          vert:     a.vert,
-          category: a.category,
-          typecode: a.typecode,
-          provider: PROVIDER,
+          type:           'flight',
+          icao:           a.id,
+          callsign:       a.callsign,
+          altFt:          a.altFt,
+          kts:            a.kts,
+          heading:        a.heading,
+          squawk:         a.squawk,
+          dbFlags:        a.dbFlags,
+          vert:           a.vert,
+          category:       a.category,
+          typecode:       a.typecode,
+          provider:       PROVIDER,
+          classification: classification,
         },
       });
       entityMap.set(a.id, entity);

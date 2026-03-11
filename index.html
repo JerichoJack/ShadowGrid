@@ -99,6 +99,64 @@
     .layer-btn.inactive .dot { background: #333; }
     .layer-btn.inactive { color: #446655; border-color: #1a3328; }
 
+    /* ── Layer Button Collapse Toggle ─────────────────────────────────────────── */
+    .layer-btn-header {
+      display: flex; align-items: center; gap: 6px; width: 100%;
+      cursor: pointer;
+    }
+    .layer-btn .collapse-chevron {
+      display: none;
+      font-size: 10px; width: 10px; text-align: center;
+      transition: transform 0.2s;
+    }
+    .layer-btn.has-filters .collapse-chevron {
+      display: inline-block;
+    }
+    .layer-btn.has-filters.collapsed .collapse-chevron {
+      transform: rotate(-90deg);
+    }
+
+    /* ── Filter Button Containers ─────────────────────────────────────────────── */
+    .filter-container {
+      display: none;
+      flex-direction: row; flex-wrap: wrap; gap: 6px;
+      padding-left: 26px; padding-top: 4px;
+      margin-top: -4px;
+    }
+    .filter-container.visible:not(.collapsed) {
+      display: flex;
+    }
+
+    /* ── Filter Buttons ────────────────────────── */
+    .filter-btn {
+      background: rgba(0,0,0,0.4);
+      border: 1px solid rgba(0, 255, 136, 0.2);
+      color: rgba(0, 255, 136, 0.6);
+      font-family: var(--font-mono);
+      font-size: 8px; letter-spacing: 0.05em;
+      text-transform: uppercase;
+      padding: 4px 8px;
+      cursor: pointer;
+      transition: all 0.15s;
+      backdrop-filter: blur(4px);
+      border-radius: 2px;
+      min-width: auto;
+      white-space: nowrap;
+    }
+    .filter-btn:hover {
+      background: rgba(0,0,0,0.5);
+      border-color: rgba(0, 255, 136, 0.4);
+      color: rgba(0, 255, 136, 0.8);
+    }
+    .filter-btn.active {
+      background: rgba(0, 255, 136, 0.2);
+      border-color: var(--green);
+      color: var(--green);
+    }
+    .filter-btn.inactive {
+      opacity: 0.4;
+    }
+
     /* ── Right Panel — Shader Modes ─────────────── */
     #panel-right {
       position: absolute;
@@ -224,12 +282,43 @@
 
     <!-- Layer toggles — keep pointer-events for clicks -->
     <div id="panel-left">
-      <button class="layer-btn active" data-layer="flights">
+      <button class="layer-btn inactive" data-layer="flights" data-has-filters="true">
+        <span class="collapse-chevron">▼</span>
         <span class="dot"></span> Air Traffic
       </button>
-      <button class="layer-btn active" data-layer="satellites">
+      <div class="filter-container collapsed" data-filter-group="flights">
+        <div style="display: flex; gap: 4px; width: 100%; margin-bottom: 2px;">
+          <span style="font-size: 7px; color: rgba(0,255,136,0.4); align-self: center;">Classification:</span>
+          <button class="filter-btn active" data-filter="flights-classification:military">Military</button>
+          <button class="filter-btn active" data-filter="flights-classification:commercial">Commercial</button>
+          <button class="filter-btn active" data-filter="flights-classification:other">Other</button>
+        </div>
+        <div style="display: flex; gap: 4px; width: 100%; flex-wrap: wrap;">
+          <span style="font-size: 7px; color: rgba(0,255,136,0.4); width: 100%; margin-bottom: 0px;">Type:</span>
+          <button class="filter-btn active" data-filter="flights-type:heavy">Heavy</button>
+          <button class="filter-btn active" data-filter="flights-type:widebody">Widebody</button>
+          <button class="filter-btn active" data-filter="flights-type:jet">Jet</button>
+          <button class="filter-btn active" data-filter="flights-type:turboprop">Turboprop</button>
+          <button class="filter-btn active" data-filter="flights-type:helicopter">Heli</button>
+          <button class="filter-btn active" data-filter="flights-type:light">Light</button>
+          <button class="filter-btn active" data-filter="flights-type:generic">Generic</button>
+        </div>
+      </div>
+
+      <button class="layer-btn inactive" data-layer="satellites" data-has-filters="true">
+        <span class="collapse-chevron">▼</span>
         <span class="dot"></span> Satellites
       </button>
+      <div class="filter-container collapsed" data-filter-group="satellites">
+        <button class="filter-btn active" data-filter="satellites:military">Military</button>
+        <button class="filter-btn active" data-filter="satellites:crewed">Crewed</button>
+        <button class="filter-btn active" data-filter="satellites:communication">Comm</button>
+        <button class="filter-btn active" data-filter="satellites:earthobservation">Earth Obs</button>
+        <button class="filter-btn active" data-filter="satellites:navigation">Nav</button>
+        <button class="filter-btn active" data-filter="satellites:astronomical">Astro</button>
+        <button class="filter-btn active" data-filter="satellites:unknown">Unknown</button>
+      </div>
+
       <button class="layer-btn inactive" data-layer="traffic">
         <span class="dot"></span> Street Flow
       </button>

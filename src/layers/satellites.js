@@ -35,7 +35,10 @@ const SPACETRACK_PASS =  import.meta.env.VITE_SPACETRACK_PASSWORD   ?? '';
 const PROPAGATE_MS  = 1_000;
 const TRACK_MINUTES = 90;
 const TRACK_STEPS   = 60;
-const MAX_SATS      = 200;   // cap for performance
+const MAX_SATS_RAW  = Number.parseInt(import.meta.env.VITE_SATELLITE_MAX_OBJECTS ?? '200', 10);
+const MAX_SATS      = Number.isFinite(MAX_SATS_RAW)
+  ? Math.min(Math.max(MAX_SATS_RAW, 1), 5000)
+  : 200; // cap for performance; adjustable via VITE_SATELLITE_MAX_OBJECTS
 
 // ── CelesTrak GP TLE feeds (no key, no rate limit) ───────────────────────────
 // Each feed has a primary URL (via Vite proxy → celestrak.org) and a direct
@@ -90,8 +93,11 @@ const CELESTRAK_TIMEOUT_MS = 2_000;
 // ── Space-Track feeds (free account required at space-track.org) ──────────────
 // ⚠️  Must go through the Vite /api/spacetrack proxy — direct browser fetches
 //     are blocked by CORS (space-track.org sends no Access-Control-Allow-Origin).
+// Uses JSON format to get OBJECT_NAME field (TLE format omits object names).
+// Ordered by CREATION_DATE (newest first) to prioritize recently deployed military/
+// reconnaissance satellites over older objects.
 const SPACETRACK_LOGIN_URL = '/api/spacetrack/ajaxauth/login';
-const SPACETRACK_TLE_URL   = '/api/spacetrack/basicspacedata/query/class/gp/EPOCH/%3Enow-1/orderby/NORAD_CAT_ID/limit/200/format/tle';
+const SPACETRACK_TLE_URL   = () => `/api/spacetrack/basicspacedata/query/class/gp/EPOCH/%3Enow-1/orderby/CREATION_DATE%20DESC/limit/${MAX_SATS}/format/json`;
 
 // ── N2YO (1000 req/hr free tier, requires API key) ────────────────────────────
 // N2YO doesn't provide bulk TLE dumps but does provide individual satellite TLE.
@@ -124,10 +130,35 @@ const BUILTIN_TLE_FALLBACKS = [
 
 // ── State ─────────────────────────────────────────────────────────────────────
 
-/** @type {Map<string, { satrec: object, entity: Cesium.Entity, trackEntity: Cesium.Entity }>} */
+/** @type {Map<string, { satrec: object, entity: Cesium.Entity, trackEntity: Cesium.Entity, meta: object }>} */
 const satMap  = new Map();
-let enabled   = true;
+let enabled   = false;  // Start disabled by default
 let lastSatelliteStatusKey = '';
+
+// Classification filter state — all enabled by default
+const classificationFilters = {
+  military: true,
+  crewed: true,
+  communication: true,
+  earthobservation: true,
+  navigation: true,
+  astronomical: true,
+  unknown: true,
+};
+
+/**
+ * Determine if a satellite entity should be visible based on enabled state and filters
+ */
+function shouldShowSatellite(meta) {
+  if (!enabled) return false;
+  
+  if (meta.isMilitary) return classificationFilters.military;
+  if ((meta.crewedStatus ?? '').toLowerCase() === 'crewed') return classificationFilters.crewed;
+  
+  const app = (meta.application ?? 'Unknown').toLowerCase();
+  const filterKey = app === 'earth observation' ? 'earthobservation' : app;
+  return classificationFilters[filterKey] ?? classificationFilters.unknown;
+}
 
 function publishSystemStatus(msg, level = 'ok', key = `${level}:${msg}`) {
   if (lastSatelliteStatusKey === key) return;
@@ -155,7 +186,8 @@ export async function initSatellites(viewer) {
   for (const { name, line1, line2 } of tleRecords) {
     try {
       const satrec = satellite.twoline2satrec(line1, line2);
-      addSatelliteEntity(viewer, name, satrec);
+      const meta = deriveSatelliteMeta(name, line2);
+      addSatelliteEntity(viewer, name, satrec, meta);
     } catch { /* skip malformed */ }
   }
 
@@ -175,10 +207,21 @@ export async function initSatellites(viewer) {
   return {
     setEnabled(val) {
       enabled = val;
-      satMap.forEach(({ entity, trackEntity }) => {
-        entity.show      = val;
-        trackEntity.show = val;
+      satMap.forEach(({ entity, trackEntity, meta }) => {
+        entity.show      = shouldShowSatellite(meta);
+        trackEntity.show = shouldShowSatellite(meta);
       });
+    },
+    setClassificationFilter(classification, enabled) {
+      const key = classification.toLowerCase();
+      if (key in classificationFilters) {
+        classificationFilters[key] = enabled;
+        // Update visibility of all entities
+        satMap.forEach(({ entity, trackEntity, meta }) => {
+          entity.show      = shouldShowSatellite(meta);
+          trackEntity.show = shouldShowSatellite(meta);
+        });
+      }
     },
     get count() { return satMap.size; },
     get provider() { return PROVIDER; },
@@ -299,11 +342,18 @@ async function loadSpaceTrack() {
     });
     if (!loginResp.ok) throw new Error(`login ${loginResp.status}`);
 
-    const resp = await fetch(SPACETRACK_TLE_URL, { credentials: 'include' });
+    const resp = await fetch(SPACETRACK_TLE_URL(), { credentials: 'include' });
     if (!resp.ok) throw new Error(`Space-Track ${resp.status}`);
-    const text    = await resp.text();
-    const records = parseTLEText(text);
-    console.debug(`[Satellites] Space-Track: ${records.length} TLEs`);
+    const data = await resp.json();
+    
+    // Convert Space-Track JSON to TLE record format
+    const records = (Array.isArray(data) ? data : data.results ?? []).map(obj => ({
+      name: (obj.OBJECT_NAME ?? obj.SATNAME ?? '').trim() || `NORAD ${obj.NORAD_CAT_ID}`,
+      line1: obj.TLE_LINE1 ?? '',
+      line2: obj.TLE_LINE2 ?? '',
+    })).filter(r => r.line1 && r.line2);
+    
+    console.debug(`[Satellites] Space-Track: ${records.length} TLEs (${records.filter(r => r.name.startsWith('NORAD')).length} unnamed)`);
     return records;
   } catch (err) {
     console.warn('[Satellites] Space-Track failed — falling back to CelesTrak:', err.message);
@@ -344,25 +394,200 @@ async function loadN2YO() {
 // ── TLE text parser ───────────────────────────────────────────────────────────
 
 function parseTLEText(text) {
-  const lines   = text.trim().split('\n').map(l => l.trim()).filter(Boolean);
+  const lines = text
+    .split(/\r?\n/)
+    .map(l => l.trim())
+    .filter(Boolean);
+
+  /** @type {Array<{ name: string, line1: string, line2: string }>} */
   const records = [];
-  for (let i = 0; i + 2 < lines.length; i += 3) {
-    records.push({ name: lines[i], line1: lines[i + 1], line2: lines[i + 2] });
+  let pendingName = '';
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+
+    // Some feeds provide line 0 as "0 OBJECT NAME".
+    if (line.startsWith('0 ')) {
+      pendingName = line.slice(2).trim();
+      continue;
+    }
+
+    // Match canonical TLE line-1 / line-2 pairs.
+    if (!line.startsWith('1 ')) continue;
+
+    const line1 = line;
+    const line2 = lines[i + 1] ?? '';
+    if (!line2.startsWith('2 ')) continue;
+
+    let name = pendingName;
+    if (!name) {
+      // 3-line feeds may put raw object name on the previous line.
+      const prev = lines[i - 1] ?? '';
+      if (prev && !prev.startsWith('0 ') && !prev.startsWith('1 ') && !prev.startsWith('2 ')) {
+        name = prev;
+      }
+    }
+
+    // 2-line feeds have no name; derive a stable fallback from SATCAT ID.
+    if (!name) {
+      const satcat = line1.slice(2, 7).trim();
+      name = satcat ? `NORAD ${satcat}` : 'UNKNOWN SATELLITE';
+    }
+
+    records.push({ name, line1, line2 });
+    pendingName = '';
+    i += 1; // consume line 2
   }
+
   return records;
+}
+
+function deriveSatelliteMeta(name, line2) {
+  const upperName = (name ?? '').toUpperCase();
+
+  const isMilitary = classifyMilitaryStatus(upperName);
+  const application = classifySatelliteApplication(upperName);
+  const crewedStatus = classifyCrewedStatus(upperName);
+  const orbitType = classifyOrbitType(line2);
+
+  return { isMilitary, application, crewedStatus, orbitType };
+}
+
+function classifyMilitaryStatus(upperName) {
+  const military = [
+    // US National Reconnaissance Office (spy satellites)
+    'NROL', 'NRO',
+    // US Air Force AFSPC / Space Force designations
+    'USAF', 'USA-', 'USSF', 'AFSPC',
+    // Russian military
+    'COSMOS', 'YAOGAN', 'MILITARY', 'DEFENSE',
+    // US Early warning / sensing
+    'DSP', 'SBIRS', 'WARNING', 'EARLY WARN',
+    // US Reconnaissance satellites (various programs)
+    'KH-11', 'KH-9', 'KH-8', 'KEYHOLE', 'ORION', 'IMPROVED CRYSTAL',
+    'LACROSSE', 'RAINBOW', 'VORTEX', 'JUMPSEAT',
+    // US Communications
+    'MILSTAR', 'SKYNET', 'PYRAMIDS',
+    'FLTSAT', 'DSCS', 'AFSAT', 'AFTS-',
+    // US Navy systems
+    'NAVY', 'SSN-', 'FLTSATCOM', 'UFO-',
+    // Chinese military/reconnaissance
+    'YAOGAN', 'ZIYUAN', 'HUANJING',
+    // Russian military/reconnaissance
+    'KOPEK', 'CYKLOP', 'KVANT', 'PROGNOZ',
+    // Misc military designations
+    'HEXAGON', 'GAMBIT', 'TALENT', 'SIGINT', 'COMINT', 'ELINT',
+    'RECONNAISSANCE', 'RECONNAISSANCE IMAGERY',
+    'NATIONAL SECURITY',
+  ];
+  return military.some(k => upperName.includes(k));
+}
+
+function classifySatelliteApplication(upperName) {
+  const astronomical = [
+    'HUBBLE', 'JWST', 'JAMES WEBB', 'CHANDRA', 'XMM',
+    'FERMI', 'TESS', 'KEPLER', 'GAIA', 'EUCLID', 'ASTRO',
+  ];
+  if (astronomical.some(k => upperName.includes(k))) return 'Astronomical';
+
+  const navigation = [
+    'GPS', 'NAVSTAR', 'GLONASS', 'GALILEO', 'BEIDOU',
+    'QZSS', 'IRNSS', 'NAVIC', 'EGNOS', 'WAAS',
+  ];
+  if (navigation.some(k => upperName.includes(k))) return 'Navigation';
+
+  const earthObservation = [
+    'LANDSAT', 'SENTINEL', 'TERRA', 'AQUA', 'NOAA',
+    'METEOR', 'HIMAWARI', 'GOES', 'RADARSAT', 'PLEIADES',
+    'WORLDVIEW', 'SPOT', 'SUOMI', 'NPP',
+  ];
+  if (earthObservation.some(k => upperName.includes(k))) return 'Earth Observation';
+
+  const communication = [
+    'STARLINK', 'ONEWEB', 'IRIDIUM', 'GLOBALSTAR', 'INTELSAT',
+    'EUTELSAT', 'INMARSAT', 'TELSTAR', 'ASTRA', 'O3B',
+    'TDRS', 'SKYNET', 'SATCOM',
+  ];
+  if (communication.some(k => upperName.includes(k))) return 'Communication';
+
+  return 'Unknown';
+}
+
+function classifyCrewedStatus(upperName) {
+  const crewed = [
+    'ISS', 'ZARYA', 'TIANGONG', 'CSS',
+    'CREW DRAGON', 'STARLINER', 'SOYUZ', 'SHENZHOU',
+  ];
+  if (crewed.some(k => upperName.includes(k))) return 'Crewed';
+  return 'Uncrewed';
+}
+
+function classifyOrbitType(line2) {
+  const l2 = (line2 ?? '').padEnd(69, ' ');
+
+  const inclinationDeg = Number.parseFloat(l2.slice(8, 16).trim());
+  const eccRaw = l2.slice(26, 33).trim();
+  const eccentricity = Number.parseFloat(`0.${eccRaw}`);
+  const meanMotionRevDay = Number.parseFloat(l2.slice(52, 63).trim());
+
+  if (!Number.isFinite(meanMotionRevDay) || meanMotionRevDay <= 0) return 'Unknown';
+
+  const periodMinutes = 1440 / meanMotionRevDay;
+  const nearGeoPeriod = Math.abs(periodMinutes - 1436) < 40;
+  const lowInclination = Number.isFinite(inclinationDeg) ? inclinationDeg < 20 : false;
+  const lowEccentricity = Number.isFinite(eccentricity) ? eccentricity < 0.02 : true;
+
+  if (nearGeoPeriod && lowInclination && lowEccentricity) return 'GEO';
+  if (periodMinutes < 128) return 'LEO';
+  if (periodMinutes < 600) return 'MEO';
+
+  const highEccentricity = Number.isFinite(eccentricity) ? eccentricity > 0.25 : false;
+  if (highEccentricity || periodMinutes >= 600) return 'HEO';
+  return 'Unknown';
 }
 
 // ── Entity creation ───────────────────────────────────────────────────────────
 
-function addSatelliteEntity(viewer, name, satrec) {
+function addSatelliteEntity(viewer, name, satrec, meta = {}) {
   const now    = new Date();
   const posVel = satellite.propagate(satrec, now);
   if (!posVel.position) return;
+
+  const isMilitary = meta.isMilitary === true;
+  const isCrewed = (meta.crewedStatus ?? '').toLowerCase() === 'crewed';
+  const application = meta.application ?? 'Unknown';
+
+  let pointColor;
+  if (isMilitary) {
+    pointColor = Cesium.Color.fromCssColorString('#ff3b30'); // red
+  } else if (isCrewed) {
+    pointColor = Cesium.Color.fromCssColorString('#00ff66'); // green
+  } else {
+    // Color by application type
+    switch (application) {
+      case 'Communication':
+        pointColor = Cesium.Color.fromCssColorString('#ffea00'); // yellow
+        break;
+      case 'Earth Observation':
+        pointColor = Cesium.Color.fromCssColorString('#ff9800'); // orange
+        break;
+      case 'Navigation':
+        pointColor = Cesium.Color.fromCssColorString('#9c27b0'); // purple
+        break;
+      case 'Astronomical':
+        pointColor = Cesium.Color.fromCssColorString('#e91e63'); // pink
+        break;
+      default:
+        pointColor = Cesium.Color.fromCssColorString('#00aaff'); // cyan
+        break;
+    }
+  }
 
   const initPos        = eciToCartesian(posVel.position, now);
   const trackPositions = computeGroundTrack(satrec, now);
 
   const trackEntity = viewer.entities.add({
+    show: shouldShowSatellite(meta),  // Initialize based on filters
     polyline: {
       positions: trackPositions,
       width:     1,
@@ -377,9 +602,10 @@ function addSatelliteEntity(viewer, name, satrec) {
 
   const entity = viewer.entities.add({
     position: initPos,
+    show: shouldShowSatellite(meta),  // Initialize based on filters
     point: {
       pixelSize:       15,
-      color:           Cesium.Color.fromCssColorString('#00aaff'),
+      color:           pointColor,
       outlineColor:    Cesium.Color.fromCssColorString('#003366'),
       outlineWidth:    1,
       scaleByDistance: new Cesium.NearFarScalar(1e5, 2, 1e7, 0.8),
@@ -397,10 +623,18 @@ function addSatelliteEntity(viewer, name, satrec) {
       scaleByDistance:  new Cesium.NearFarScalar(1e5, 1, 1e7, 0),
       translucencyByDistance: new Cesium.NearFarScalar(1e5, 10, 5e6, 0),
     },
-    properties: { type: 'satellite', name, provider: PROVIDER },
+    properties: {
+      type: 'satellite',
+      name,
+      provider: PROVIDER,
+      isMilitary,
+      orbitType: meta.orbitType ?? 'Unknown',
+      application: meta.application ?? 'Unknown',
+      crewedStatus: meta.crewedStatus ?? 'Unknown',
+    },
   });
 
-  satMap.set(name, { satrec, entity, trackEntity });
+  satMap.set(name, { satrec, entity, trackEntity, meta });
 }
 
 // ── Per-frame position update ─────────────────────────────────────────────────
