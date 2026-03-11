@@ -7,3 +7,6 @@ dist/
 package-lock.json
 opensky_api_credentials.json
 *.zip
+
+# Generated camera database (rebuild with: node server/collectors/collectCameras.mjs)
+public/camera-data/
