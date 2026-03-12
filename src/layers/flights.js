@@ -7,6 +7,8 @@
 import * as Cesium from 'cesium';
 
 const PROVIDER = (import.meta.env.VITE_FLIGHT_PROVIDER ?? 'proxy').toLowerCase();
+const SERVER_HEAVY_MODE = (import.meta.env.VITE_SERVER_HEAVY_MODE ?? 'false').toLowerCase() === 'true';
+const ACTIVE_PROVIDER = SERVER_HEAVY_MODE ? 'proxy' : PROVIDER;
 const POLL_MS  = 10_000;
 const PROXY_URL = '/api/localproxy/api/flights';
 const ADSBOOL_BASE_URL = '/api/adsbool';
@@ -742,7 +744,7 @@ function applyFlatIconVisibility() {
 // ── Public API ────────────────────────────────────────────────────────────────
 
 export async function initFlights(viewer) {
-  console.info(`[Flights] Provider: ${PROVIDER}`);
+  console.info(`[Flights] Provider: ${ACTIVE_PROVIDER}${SERVER_HEAVY_MODE ? ' (server-heavy mode)' : ''}`);
 
   // Defer the first fetch until the camera finishes its opening flyTo — before
   // that, getViewportBounds() returns null and providers reject lat/0/lon/0.
@@ -810,7 +812,7 @@ export async function initFlights(viewer) {
       }
     },
     get count()    { return entityMap.size; },
-    get provider() { return PROVIDER; },
+    get provider() { return ACTIVE_PROVIDER; },
   };
 }
 
@@ -917,21 +919,21 @@ async function fetchAndRender(viewer) {
     renderAircraft(viewer, aircraft);
 
     if (!flightFeedHealthy) {
-      publishSystemStatus(`● FLIGHT FEED RECOVERED · ${PROVIDER.toUpperCase()}`, 'ok', `flights:recovered:${PROVIDER}`);
+      publishSystemStatus(`● FLIGHT FEED RECOVERED · ${ACTIVE_PROVIDER.toUpperCase()}`, 'ok', `flights:recovered:${ACTIVE_PROVIDER}`);
     } else if (!hasPublishedFlightOk) {
-      publishSystemStatus(`● FLIGHT FEED OK · ${PROVIDER.toUpperCase()}`, 'ok', `flights:ok:${PROVIDER}`);
+      publishSystemStatus(`● FLIGHT FEED OK · ${ACTIVE_PROVIDER.toUpperCase()}`, 'ok', `flights:ok:${ACTIVE_PROVIDER}`);
       hasPublishedFlightOk = true;
     }
     flightFeedHealthy = true;
   } catch (err) {
-    console.warn(`[Flights] Fetch failed (${PROVIDER}):`, err.message);
-    publishSystemStatus(`⚠ FLIGHT FEED ERROR · ${PROVIDER.toUpperCase()} · ${err?.message ?? 'request failed'}`, 'error', `flights:error:${PROVIDER}:${err?.message ?? 'unknown'}`);
+    console.warn(`[Flights] Fetch failed (${ACTIVE_PROVIDER}):`, err.message);
+    publishSystemStatus(`⚠ FLIGHT FEED ERROR · ${ACTIVE_PROVIDER.toUpperCase()} · ${err?.message ?? 'request failed'}`, 'error', `flights:error:${ACTIVE_PROVIDER}:${err?.message ?? 'unknown'}`);
     flightFeedHealthy = false;
   }
 }
 
 async function fetchAircraft(bounds) {
-  switch (PROVIDER) {
+  switch (ACTIVE_PROVIDER) {
     case 'airplaneslive': {
       try {
         return await fetchReadsbLike(AIRPLANESLIVE_BASE_URL, bounds, 'airplanes.live');
@@ -1048,6 +1050,9 @@ async function fetchProxy(bounds) {
   if (bounds) {
     const { minLon, minLat, maxLon, maxLat } = bounds;
     url += `?bounds=${minLon.toFixed(4)},${minLat.toFixed(4)},${maxLon.toFixed(4)},${maxLat.toFixed(4)}`;
+  }
+  if (SERVER_HEAVY_MODE) {
+    url += bounds ? '&mode=heavy' : '?mode=heavy';
   }
   const resp = await fetch(url);
   if (!resp.ok) throw new Error(`Proxy ${resp.status} — is server/proxy.mjs running?`);
@@ -1277,7 +1282,7 @@ function renderAircraft(viewer, aircraft) {
           vert:           a.vert,
           category:       a.category,
           typecode:       a.typecode,
-          provider:       PROVIDER,
+          provider:       ACTIVE_PROVIDER,
           classification: classification,
         },
       });

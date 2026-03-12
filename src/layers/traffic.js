@@ -8,14 +8,20 @@ import * as Cesium from 'cesium';
 
 const OVERPASS_API = 'https://overpass-api.de/api/interpreter';
 const GOOGLE_ROUTES_API = '/api/google-routes/directions/v2:computeRoutes';
+const GOOGLE_SERVER_ROADS_API = '/api/localproxy/api/traffic/google';
 const GOOGLE_MAPS_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY ?? '';
 const TRAFFIC_PROVIDER = (import.meta.env.VITE_TRAFFIC_PROVIDER ?? 'auto').toLowerCase();
+const SERVER_HEAVY_MODE = (import.meta.env.VITE_SERVER_HEAVY_MODE ?? 'false').toLowerCase() === 'true';
 const TRAFFIC_RENDER_MAX_DISTANCE_M = 800000;
 const TRAFFIC_PARTICLE_HEIGHT_OFFSET_M = 1.5;
 const TRAFFIC_PARTICLE_SIZE_PX = 7;
 const TRAFFIC_REBUILD_MINUTES = 5;
 const GOOGLE_REFRESH_MS = 90_000;
 const GOOGLE_DEPARTURE_OFFSET_MS = 5 * 60_000;
+const TRAFFIC_MAX_PARTICLES_RAW = Number.parseInt(import.meta.env.VITE_TRAFFIC_MAX_PARTICLES ?? '50000', 10);
+const TRAFFIC_MAX_PARTICLES = Number.isFinite(TRAFFIC_MAX_PARTICLES_RAW)
+  ? Math.min(Math.max(TRAFFIC_MAX_PARTICLES_RAW, 100), 50_000)
+  : 10_000;
 const VEHICLE_COLORS = {
   car:  '#ffcc00',     // yellow
   bus:  '#ff6b35',     // orange
@@ -31,7 +37,7 @@ let animationHandle = null;
 let currentBbox = null;
 let roadPrimitives = [];
 let particleCollection = null;
-let trafficProfile = { label: 'daytime', densityMult: 1.0, speedMult: 1.0, maxParticles: 2200 };
+let trafficProfile = { label: 'daytime', densityMult: 1.0, speedMult: 1.0, maxParticles: TRAFFIC_MAX_PARTICLES };
 let lastProfileMinute = -1;
 let trafficMode = 'osm-sim';
 let refreshTimer = null;
@@ -181,6 +187,16 @@ function createGoogleRoutePairs(bbox) {
 }
 
 async function fetchGoogleTrafficRoads(bbox) {
+  if (SERVER_HEAVY_MODE) {
+    const bounds = `${bbox.west.toFixed(6)},${bbox.south.toFixed(6)},${bbox.east.toFixed(6)},${bbox.north.toFixed(6)}`;
+    const serverResp = await fetch(`${GOOGLE_SERVER_ROADS_API}?bounds=${bounds}`);
+    if (serverResp.ok) {
+      const data = await serverResp.json();
+      return data?.roads ?? [];
+    }
+    console.warn(`[Traffic] Server roads endpoint failed (${serverResp.status}), falling back to browser mode`);
+  }
+
   const pairs = createGoogleRoutePairs(bbox);
   const roads = [];
   const departureTime = new Date(Date.now() + GOOGLE_DEPARTURE_OFFSET_MS).toISOString();
@@ -298,21 +314,21 @@ function localHourFromLongitude(lon) {
 function getTrafficProfile(localHour) {
   // Broad synthetic profile: this layer is simulated flow, not live telemetry.
   if (localHour < 5 || localHour >= 23) {
-    return { label: 'late-night', densityMult: 0.14, speedMult: 0.72, maxParticles: 520 };
+    return { label: 'late-night', densityMult: 0.14, speedMult: 0.72, maxParticles: Math.round(TRAFFIC_MAX_PARTICLES * 0.24) };
   }
   if (localHour < 7) {
-    return { label: 'early-morning', densityMult: 0.28, speedMult: 0.8, maxParticles: 820 };
+    return { label: 'early-morning', densityMult: 0.28, speedMult: 0.8, maxParticles: Math.round(TRAFFIC_MAX_PARTICLES * 0.37) };
   }
   if (localHour < 10) {
-    return { label: 'morning-rush', densityMult: 0.95, speedMult: 1.05, maxParticles: 1900 };
+    return { label: 'morning-rush', densityMult: 0.95, speedMult: 1.05, maxParticles: Math.round(TRAFFIC_MAX_PARTICLES * 0.86) };
   }
   if (localHour < 16) {
-    return { label: 'midday', densityMult: 0.62, speedMult: 0.92, maxParticles: 1300 };
+    return { label: 'midday', densityMult: 0.62, speedMult: 0.92, maxParticles: Math.round(TRAFFIC_MAX_PARTICLES * 0.59) };
   }
   if (localHour < 20) {
-    return { label: 'evening-rush', densityMult: 1.0, speedMult: 1.0, maxParticles: 2200 };
+    return { label: 'evening-rush', densityMult: 1.0, speedMult: 1.0, maxParticles: TRAFFIC_MAX_PARTICLES };
   }
-  return { label: 'night', densityMult: 0.34, speedMult: 0.85, maxParticles: 950 };
+  return { label: 'night', densityMult: 0.34, speedMult: 0.85, maxParticles: Math.round(TRAFFIC_MAX_PARTICLES * 0.43) };
 }
 
 function refreshTrafficProfile() {
@@ -458,7 +474,7 @@ function spawnParticles(roads) {
   particles = [];
   const vehicleTypes = Object.keys(VEHICLE_COLORS);
   const profile = trafficMode === 'google-live'
-    ? { densityMult: 1.0, speedMult: 1.0, maxParticles: 2400 }
+    ? { densityMult: 1.0, speedMult: 1.0, maxParticles: TRAFFIC_MAX_PARTICLES }
     : trafficProfile;
   const orderedRoads = [...roads].sort((a, b) => {
     if (b.priority !== a.priority) return b.priority - a.priority;

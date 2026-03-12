@@ -4,7 +4,8 @@
   "description": "Browser-based geospatial intelligence platform — live flights, satellites, CCTV, and military-grade shaders over a photorealistic 3D globe.",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "node scripts/dev.mjs",
+    "dev:vite": "vite",
     "proxy": "node server/proxy.mjs",
     "start": "concurrently --names proxy,vite --prefix-colors cyan,magenta \"node server/proxy.mjs\" \"vite\"",
     "build": "vite build",

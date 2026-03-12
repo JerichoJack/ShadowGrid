@@ -28,17 +28,22 @@ import * as satellite from 'satellite.js';
 // ── Config ────────────────────────────────────────────────────────────────────
 
 const PROVIDER       = (import.meta.env.VITE_SATELLITE_PROVIDER    ?? 'celestrak').toLowerCase();
+const SERVER_HEAVY_MODE = (import.meta.env.VITE_SERVER_HEAVY_MODE ?? 'false').toLowerCase() === 'true';
 const N2YO_KEY       =  import.meta.env.VITE_N2YO_API_KEY          ?? '';
 const SPACETRACK_USER =  import.meta.env.VITE_SPACETRACK_USERNAME   ?? '';
 const SPACETRACK_PASS =  import.meta.env.VITE_SPACETRACK_PASSWORD   ?? '';
+const SATELLITE_SNAPSHOT_URL = '/api/localproxy/api/satellites/snapshot';
+const SNAPSHOT_POLL_MS = 2_000;
 
 const PROPAGATE_MS  = 1_000;
 const TRACK_MINUTES = 90;
 const TRACK_STEPS   = 60;
-const MAX_SATS_RAW  = Number.parseInt(import.meta.env.VITE_SATELLITE_MAX_OBJECTS ?? '200', 10);
-const MAX_SATS      = Number.isFinite(MAX_SATS_RAW)
-  ? Math.min(Math.max(MAX_SATS_RAW, 1), 5000)
-  : 200; // cap for performance; adjustable via VITE_SATELLITE_MAX_OBJECTS
+const _MAX_SATS_ENV = import.meta.env.VITE_SATELLITE_MAX_OBJECTS ?? '';
+// In server-heavy mode the server does the propagation work; no client-side cap.
+// Set VITE_SATELLITE_MAX_OBJECTS to an explicit number to override.
+const MAX_SATS = SERVER_HEAVY_MODE
+  ? (_MAX_SATS_ENV ? Math.max(parseInt(_MAX_SATS_ENV, 10) || 99_999, 1) : 99_999)
+  : Math.min(Math.max(parseInt(_MAX_SATS_ENV || '200', 10) || 200, 1), 5_000);
 
 // ── CelesTrak GP TLE feeds (no key, no rate limit) ───────────────────────────
 // Each feed has a primary URL (via Vite proxy → celestrak.org) and a direct
@@ -97,7 +102,10 @@ const CELESTRAK_TIMEOUT_MS = 2_000;
 // Ordered by CREATION_DATE (newest first) to prioritize recently deployed military/
 // reconnaissance satellites over older objects.
 const SPACETRACK_LOGIN_URL = '/api/spacetrack/ajaxauth/login';
-const SPACETRACK_TLE_URL   = () => `/api/spacetrack/basicspacedata/query/class/gp/EPOCH/%3Enow-1/orderby/CREATION_DATE%20DESC/limit/${MAX_SATS}/format/json`;
+// No limit clause — fetch the full GP catalog (server-heavy: server handles this;
+// client-direct: Space-Track returns everything up to their server default).
+const SPACETRACK_TLE_URL = () =>
+  `/api/spacetrack/basicspacedata/query/class/gp/EPOCH/%3Enow-1/orderby/CREATION_DATE%20DESC/format/json`;
 
 // ── N2YO (1000 req/hr free tier, requires API key) ────────────────────────────
 // N2YO doesn't provide bulk TLE dumps but does provide individual satellite TLE.
@@ -180,6 +188,10 @@ function publishSystemStatus(msg, level = 'ok', key = `${level}:${msg}`) {
 // ── Public API ────────────────────────────────────────────────────────────────
 
 export async function initSatellites(viewer) {
+  if (SERVER_HEAVY_MODE) {
+    return initSatellitesServerSnapshot(viewer);
+  }
+
   console.info(`[Satellites] Provider: ${PROVIDER}`);
   const tleRecords = await loadTLEs();
 
@@ -228,6 +240,128 @@ export async function initSatellites(viewer) {
   };
 }
 
+async function initSatellitesServerSnapshot(viewer) {
+  console.info('[Satellites] Provider: server-snapshot (server-heavy mode)');
+
+  const entities = new Map();
+  let enabledLocal = false;
+
+  function upsertPoint(point) {
+    const pos = Cesium.Cartesian3.fromDegrees(point.lon, point.lat, point.altM);
+    const existing = entities.get(point.id);
+    if (existing) {
+      existing.position = pos;
+      existing.show = enabledLocal;
+      return;
+    }
+
+    // Classify by name so coloring matches the full (non-snapshot) path
+    const meta        = deriveSatelliteMeta(point.name, '');
+    const isMilitary  = meta.isMilitary;
+    const isCrewed    = (meta.crewedStatus ?? '').toLowerCase() === 'crewed';
+    const application = meta.application ?? 'Unknown';
+
+    let pointColor;
+    if (isMilitary) {
+      pointColor = Cesium.Color.fromCssColorString('#ff3b30');
+    } else if (isCrewed) {
+      pointColor = Cesium.Color.fromCssColorString('#00ff66');
+    } else {
+      switch (application) {
+        case 'Communication':    pointColor = Cesium.Color.fromCssColorString('#ffea00'); break;
+        case 'Earth Observation': pointColor = Cesium.Color.fromCssColorString('#ff9800'); break;
+        case 'Navigation':       pointColor = Cesium.Color.fromCssColorString('#9c27b0'); break;
+        case 'Astronomical':     pointColor = Cesium.Color.fromCssColorString('#e91e63'); break;
+        default:                 pointColor = Cesium.Color.fromCssColorString('#00aaff'); break;
+      }
+    }
+
+    const entity = viewer.entities.add({
+      id: `sat-${point.id}`,
+      position: pos,
+      point: {
+        pixelSize:       15,
+        color:           pointColor,
+        outlineColor:    Cesium.Color.fromCssColorString('#003366'),
+        outlineWidth:    1,
+        scaleByDistance: new Cesium.NearFarScalar(1e5, 2, 1e7, 0.8),
+      },
+      label: {
+        text:             point.name,
+        font:             '24px "Share Tech Mono", monospace',
+        color:            Cesium.Color.fromCssColorString('#00aaff'),
+        outlineColor:     Cesium.Color.fromCssColorString('#003366'),
+        outlineWidth:     2,
+        style:            Cesium.LabelStyle.FILL_AND_OUTLINE,
+        horizontalOrigin: Cesium.HorizontalOrigin.CENTER,
+        verticalOrigin:   Cesium.VerticalOrigin.BOTTOM,
+        pixelOffset:      new Cesium.Cartesian2(0, -30),
+        scaleByDistance:  new Cesium.NearFarScalar(1e5, 1, 1e7, 0),
+        translucencyByDistance: new Cesium.NearFarScalar(1e5, 10, 5e6, 0),
+      },
+      shadowgridType: 'satellite',
+      shadowgridMeta: {
+        name: point.name,
+        application,
+        isMilitary,
+        crewedStatus: meta.crewedStatus,
+        provider: 'server-snapshot',
+      },
+      show: enabledLocal,
+    });
+    entities.set(point.id, entity);
+  }
+
+  async function refreshSnapshot() {
+    try {
+      const resp = await fetch(`${SATELLITE_SNAPSHOT_URL}?max=${MAX_SATS}`);
+      if (!resp.ok) throw new Error(`snapshot ${resp.status}`);
+      const data = await resp.json();
+      const points = data?.points ?? [];
+
+      const seen = new Set();
+      for (const p of points) {
+        if (!Number.isFinite(p.lat) || !Number.isFinite(p.lon) || !Number.isFinite(p.altM)) continue;
+        seen.add(p.id);
+        upsertPoint(p);
+      }
+
+      for (const [id, entity] of entities) {
+        if (!seen.has(id)) {
+          viewer.entities.remove(entity);
+          entities.delete(id);
+        }
+      }
+
+      publishSystemStatus('● SATELLITE FEED OK · SERVER SNAPSHOT', 'ok', 'sat:server-snapshot:ok');
+    } catch (err) {
+      publishSystemStatus(`⚠ SATELLITE SNAPSHOT ERROR · ${err?.message ?? 'request failed'}`, 'error', `sat:server-snapshot:error:${err?.message ?? 'unknown'}`);
+    }
+  }
+
+  setInterval(() => {
+    if (!enabledLocal) return;
+    refreshSnapshot();
+  }, SNAPSHOT_POLL_MS);
+
+  await refreshSnapshot();
+
+  return {
+    setEnabled(val) {
+      enabledLocal = val;
+      entities.forEach(entity => {
+        entity.show = enabledLocal;
+      });
+    },
+    setClassificationFilter(_classification, _enabled) {
+      // Not supported in snapshot mode yet.
+    },
+    get count() {
+      return entities.size;
+    },
+  };
+}
+
 // ── TLE loading: dispatch to provider ────────────────────────────────────────
 
 async function loadTLEs() {
@@ -245,7 +379,8 @@ async function loadTLEs() {
     records.unshift({ name: ISS_FALLBACK[0], line1: ISS_FALLBACK[1], line2: ISS_FALLBACK[2] });
   }
 
-  return records.slice(0, MAX_SATS);
+  // In server-heavy mode MAX_SATS is effectively unlimited; still honour an explicit env override.
+  return Number.isFinite(MAX_SATS) && MAX_SATS < 99_999 ? records.slice(0, MAX_SATS) : records;
 }
 
 // ── Provider: CelesTrak (free, no key) ───────────────────────────────────────
