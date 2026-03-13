@@ -286,6 +286,18 @@ Heavy mode now supports the env-selected flight, satellite, and traffic provider
 
 The cache is persisted to `server/cache/world-snapshot-cache.json` so warm data can survive a restart.
 
+If heavy mode fails with `ERR_MODULE_NOT_FOUND` (for example, `Cannot find package 'h3-js' imported from server/proxy.mjs`), the server install is incomplete. Reinstall dependencies from the project root:
+
+```bash
+npm install
+```
+
+Then rerun:
+
+```bash
+npm run dev -- --host --server
+```
+
 ---
 
 ## 📁 Project Structure

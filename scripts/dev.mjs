@@ -14,6 +14,7 @@ const viteBin = path.join(rootDir, 'node_modules', 'vite', 'bin', 'vite.js');
 const proxyEntry = path.join(rootDir, 'server', 'proxy.mjs');
 
 const children = [];
+let isShuttingDown = false;
 
 function runNode(scriptPath, args = [], env = process.env) {
   const child = spawn(process.execPath, [scriptPath, ...args], {
@@ -26,6 +27,8 @@ function runNode(scriptPath, args = [], env = process.env) {
 }
 
 function shutdown(code = 0) {
+  if (isShuttingDown) return;
+  isShuttingDown = true;
   for (const child of children) {
     if (!child.killed) {
       child.kill('SIGTERM');
@@ -34,8 +37,9 @@ function shutdown(code = 0) {
   setTimeout(() => process.exit(code), 100);
 }
 
+let proxy = null;
 if (withServer) {
-  runNode(proxyEntry, [], {
+  proxy = runNode(proxyEntry, [], {
     ...process.env,
     SHADOWGRID_SERVER_MODE: '1',
     SHADOWGRID_SERVER_HEAVY: process.env.SHADOWGRID_SERVER_HEAVY ?? '1',
@@ -51,6 +55,21 @@ const viteEnv = {
 };
 
 const vite = runNode(viteBin, viteArgs, viteEnv);
+
+if (proxy) {
+  proxy.on('exit', (code, signal) => {
+    if (isShuttingDown) return;
+    const exitCode = Number.isInteger(code) ? code : 1;
+    if (exitCode !== 0) {
+      console.error(`\n[dev] Proxy exited early (code=${exitCode}${signal ? `, signal=${signal}` : ''}).`);
+      console.error('[dev] Heavy mode requires the proxy. On a new server, run npm install and then retry.');
+      shutdown(exitCode);
+      return;
+    }
+    console.error('\n[dev] Proxy exited, stopping dev server because --server mode requires it.');
+    shutdown(0);
+  });
+}
 
 vite.on('exit', (code) => {
   shutdown(code ?? 0);
