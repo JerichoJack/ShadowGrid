@@ -87,9 +87,10 @@ function applySceneSettings(viewer) {
   ctrl.translateEventTypes = [
     Cesium.CameraEventType.MIDDLE_DRAG,
   ];
+  // WHEEL is handled manually below so zoom targets the crosshair (screen centre),
+  // not the mouse cursor position. Pinch and shift-drag remain Cesium-native.
   ctrl.zoomEventTypes = [
-    Cesium.CameraEventType.WHEEL,                // scroll = zoom
-    Cesium.CameraEventType.PINCH,                // pinch = zoom
+    Cesium.CameraEventType.PINCH,                // pinch = zoom (touch)
     { eventType: Cesium.CameraEventType.RIGHT_DRAG, modifier: Cesium.KeyboardEventModifier.SHIFT },
   ];
   ctrl.lookEventTypes = [
@@ -103,6 +104,26 @@ function applySceneSettings(viewer) {
   ctrl.minimumZoomDistance  = 100;    // don't go below 100 m
   ctrl.maximumZoomDistance  = 2.0e7; // don't zoom out past ~20 000 km
   ctrl.enableCollisionDetection = true;
+
+  // ── Crosshair-centred scroll zoom ─────────────────────────────────────────
+  // camera.zoomIn/Out moves along the camera direction (= toward screen centre),
+  // giving crosshair-locked zoom regardless of where the cursor sits.
+  viewer.canvas.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    const camera = viewer.camera;
+    const height = camera.positionCartographic?.height ?? 1_000;
+    // Normalise deltaY: browsers report in pixels (mode 0), lines (1), or pages (2)
+    let delta = e.deltaY;
+    if (e.deltaMode === 1) delta *= 20;
+    if (e.deltaMode === 2) delta *= 400;
+    // Zoom ~15 % of current altitude per standard scroll click
+    const amount = Math.abs(delta) * height * 0.0015;
+    if (delta < 0) {
+      if (height > ctrl.minimumZoomDistance) camera.zoomIn(amount);
+    } else {
+      if (height < ctrl.maximumZoomDistance) camera.zoomOut(amount);
+    }
+  }, { passive: false });
 }
 
 
