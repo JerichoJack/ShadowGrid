@@ -788,6 +788,14 @@ const aircraftTypeFilters = {
 };
 
 /**
+ * Returns true if at least one aircraft classification is active.
+ * When false, there is no point fetching flight data from the proxy.
+ */
+function isAnyClassificationActive() {
+  return Object.values(aircraftClassificationFilters).some(Boolean);
+}
+
+/**
  * Determine if a flight entity should be visible based on enabled state and filters
  */
 function shouldShowFlight(aircraftClassification, aircraftType) {
@@ -1112,7 +1120,7 @@ export async function initFlights(viewer) {
     return {
       setEnabled(val) {
         enabled = val;
-        setServerSnapshotLayerEnabled('flights', enabled);
+        setServerSnapshotLayerEnabled('flights', enabled && isAnyClassificationActive());
         syncFlightZoneVisibility();
         if (enabled) refreshFlightZones(viewer);
         entityMap.forEach((e, icaoHex) => {
@@ -1134,6 +1142,8 @@ export async function initFlights(viewer) {
             e.show = shouldShowFlight(aircraftClassification, aircraftType);
           });
           applyFlatIconVisibility();
+          // Enable or suspend proxy polling based on whether any classification is still active.
+          setServerSnapshotLayerEnabled('flights', enabled && isAnyClassificationActive());
         }
       },
       setAircraftTypeFilter(aircraftType, filterEnabled) {
@@ -1166,7 +1176,7 @@ export async function initFlights(viewer) {
   }
 
   await fetchAndRender(viewer);
-  setInterval(() => { if (enabled) fetchAndRender(viewer); }, POLL_MS);
+  setInterval(() => { if (enabled && isAnyClassificationActive()) fetchAndRender(viewer); }, POLL_MS);
 
   window.addEventListener('shadowgrid:follow', () => {
     hideAllFlatIcons = true;
@@ -1203,6 +1213,11 @@ export async function initFlights(viewer) {
           e.show = shouldShowFlight(aircraftClassification, aircraftType);
         });
         applyFlatIconVisibility();
+        // Trigger an immediate fetch when re-enabling after all were off; suppress
+        // the poll interval when all classifications are inactive to save API quota.
+        if (enabled) {
+          if (filterEnabled && isAnyClassificationActive()) fetchAndRender(viewer);
+        }
       }
     },
     setAircraftTypeFilter(aircraftType, filterEnabled) {
