@@ -335,7 +335,7 @@ ShadowGrid/
 - ✅ Phase 3 — Satellite orbital tracking with SGP4 propagation + click-to-inspect
 - ✅ Phase 4 — Street traffic system (Google live traffic + OSM fallback)
 - ✅ Phase 5 — CCTV tiled camera layer + live snapshot/video inspection panel
-- ✅ Phase 6 — FAA TFR polygons, GPSJam medium/high interference hexagons, and IODA blackout polygons tied to Flight/Internet layers with click-to-inspect detail panels.
+- ✅ Phase 6 — FAA TFR "Safe Flight" polygons, GPSJam medium/high interference hexagons, and IODA blackout polygons tied to Flight/Internet layers with click-to-inspect detail panels.
 - ✅ Phase 7 — Visual shaders (Normal, NVG, FLIR, CRT, Anime) via WebGL PostProcessStage + CSS overlays
 - ⬜ Phase 8 — Historical storage + replay backend (replace transient snapshot cache with durable spatial/time-indexed storage)
 - ⬜ Phase 9 — 4D timeline + data archival / replay with archived snapshots and a real time slider

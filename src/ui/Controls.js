@@ -18,6 +18,14 @@ function setSatelliteFilterButtonsActive(active) {
   });
 }
 
+function setFlightClassificationButtonsActive(active) {
+  const flightClassButtons = document.querySelectorAll('.filter-btn[data-filter^="flights-classification:"], .filter-btn[data-filter^="flights-overlay:"]');
+  flightClassButtons.forEach((filterBtn) => {
+    filterBtn.classList.toggle('active', active);
+    filterBtn.classList.toggle('inactive', !active);
+  });
+}
+
 export function initControls(viewer, layers) {
   if (SERVER_HEAVY_MODE) {
     setSatelliteFilterButtonsActive(false);
@@ -62,6 +70,27 @@ export function initControls(viewer, layers) {
         });
       }
 
+      if (layerName === 'flights' && isActive) {
+        // Start Air Traffic classifications disabled so operators opt-in.
+        setFlightClassificationButtonsActive(false);
+
+        const flightClassButtons = document.querySelectorAll('.filter-btn[data-filter^="flights-classification:"]');
+        flightClassButtons.forEach((filterBtn) => {
+          const [, filterType] = (filterBtn.dataset.filter ?? '').split(':');
+          if (filterType) {
+            layer?.setAircraftClassificationFilter?.(filterType, false);
+          }
+        });
+
+        const flightOverlayButtons = document.querySelectorAll('.filter-btn[data-filter^="flights-overlay:"]');
+        flightOverlayButtons.forEach((filterBtn) => {
+          const [, filterType] = (filterBtn.dataset.filter ?? '').split(':');
+          if (filterType) {
+            layer?.setFlightZoneFilter?.(filterType, false);
+          }
+        });
+      }
+
       // Show/hide filter container for this layer
       const filterContainer = btn.nextElementSibling;
       if (filterContainer?.classList.contains('filter-container')) {
@@ -96,6 +125,9 @@ export function initControls(viewer, layers) {
         } else if (prefix === 'flights-type') {
           layerName = 'flights';
           filterCategory = 'type';
+        } else if (prefix === 'flights-overlay') {
+          layerName = 'flights';
+          filterCategory = 'overlay';
         }
       } else {
         // Old satellite format: "satellites:military"
@@ -112,6 +144,8 @@ export function initControls(viewer, layers) {
         layer?.setAircraftClassificationFilter?.(filterType, isActive);
       } else if (layerName === 'flights' && filterCategory === 'type') {
         layer?.setAircraftTypeFilter?.(filterType, isActive);
+      } else if (layerName === 'flights' && filterCategory === 'overlay') {
+        layer?.setFlightZoneFilter?.(filterType, isActive);
       } else {
         // Satellites classification filter
         layer?.setClassificationFilter?.(filterType, isActive);
@@ -119,19 +153,81 @@ export function initControls(viewer, layers) {
     });
   });
 
-  // ── Shader modes ─────────────────────────────────────────────────────────
-  document.querySelectorAll('.shader-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const mode = btn.dataset.mode;
+  // ── Shader modes (Filters menu) ─────────────────────────────────────────
+  const setFiltersMenuOpen = (isOpen) => {
+    const filtersMenu = document.getElementById('hud-filters-menu');
+    const filtersToggle = document.getElementById('hud-filters-toggle');
+    if (!filtersMenu || !filtersToggle) return;
+    filtersMenu.style.display = isOpen ? 'flex' : 'none';
+    filtersToggle.textContent = isOpen ? 'Filters ▴' : 'Filters ▾';
+  };
 
-      // Update button states
-      document.querySelectorAll('.shader-btn').forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
+  const setLayersMenuOpen = (isOpen) => {
+    const layersMenu = document.getElementById('hud-layers-menu');
+    const layersToggle = document.getElementById('hud-layers-toggle');
+    if (!layersMenu || !layersToggle) return;
+    layersMenu.style.display = isOpen ? 'block' : 'none';
+    layersToggle.textContent = isOpen ? 'Layers ▴' : 'Layers ▾';
+  };
 
-      // Apply visual mode
+  setFiltersMenuOpen(false);
+
+  document.addEventListener('click', (e) => {
+    const filtersMenu = document.getElementById('hud-filters-menu');
+    const filtersRoot = e.target.closest('#hud-filters');
+    const toggleBtn = e.target.closest('#hud-filters-toggle');
+    const shaderBtn = e.target.closest('.shader-option-btn');
+    const layersMenu = document.getElementById('hud-layers-menu');
+    const layersRoot = e.target.closest('#hud-layers');
+    const layersToggleBtn = e.target.closest('#hud-layers-toggle');
+
+    if (layersToggleBtn) {
+      e.stopPropagation();
+      const isOpen = !!layersMenu && layersMenu.style.display !== 'none';
+      setLayersMenuOpen(!isOpen);
+      return;
+    }
+
+    if (toggleBtn) {
+      e.stopPropagation();
+      const isOpen = !!filtersMenu && filtersMenu.style.display !== 'none';
+      setFiltersMenuOpen(!isOpen);
+      return;
+    }
+
+    if (shaderBtn) {
+      e.stopPropagation();
+      const mode = shaderBtn.dataset.mode;
+      if (!mode) return;
+
+      document.querySelectorAll('.shader-option-btn').forEach((btn) => {
+        const isActive = btn === shaderBtn;
+        btn.classList.toggle('active', isActive);
+        btn.style.color = isActive ? 'rgba(0,255,136,0.85)' : 'rgba(0,255,136,0.65)';
+        btn.style.borderColor = isActive ? 'rgba(0,255,136,0.6)' : 'rgba(0,255,136,0.2)';
+        btn.style.background = isActive ? 'rgba(0,255,136,0.16)' : 'rgba(0,0,0,0.48)';
+      });
+
       applyShaderMode(viewer, mode);
       currentMode = mode;
-    });
+      setFiltersMenuOpen(false);
+      return;
+    }
+
+    if (filtersMenu && filtersMenu.style.display !== 'none' && !filtersRoot) {
+      setFiltersMenuOpen(false);
+    }
+
+    if (layersMenu && layersMenu.style.display !== 'none' && !layersRoot) {
+      setLayersMenuOpen(false);
+    }
+  });
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      setFiltersMenuOpen(false);
+      setLayersMenuOpen(false);
+    }
   });
 }
 

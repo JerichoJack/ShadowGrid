@@ -771,6 +771,11 @@ const aircraftClassificationFilters = {
   other: true,
 };
 
+const flightZoneFilters = {
+  gps: true,
+  airspace: true,
+};
+
 // Aircraft type filter state — all enabled by default
 const aircraftTypeFilters = {
   heavy: true,
@@ -1012,11 +1017,15 @@ function renderFlightZones(payload) {
   const usedIds = new Set();
   flightZonesDataSource.entities.removeAll();
 
-  for (const zone of payload?.flightRestrictions ?? []) {
-    addFlightRestrictionZone(zone, nowMs, maxHeight, usedIds);
+  if (flightZoneFilters.airspace) {
+    for (const zone of payload?.flightRestrictions ?? []) {
+      addFlightRestrictionZone(zone, nowMs, maxHeight, usedIds);
+    }
   }
-  for (const zone of payload?.gpsInterference ?? []) {
-    addGpsInterferenceZone(zone, nowMs, maxHeight, usedIds);
+  if (flightZoneFilters.gps) {
+    for (const zone of payload?.gpsInterference ?? []) {
+      addGpsInterferenceZone(zone, nowMs, maxHeight, usedIds);
+    }
   }
 
   syncFlightZoneVisibility();
@@ -1140,6 +1149,17 @@ export async function initFlights(viewer) {
           applyFlatIconVisibility();
         }
       },
+      setFlightZoneFilter(zoneType, filterEnabled) {
+        const zoneKey = (zoneType ?? '').toLowerCase();
+        if (zoneKey in flightZoneFilters) {
+          flightZoneFilters[zoneKey] = !!filterEnabled;
+          if (noflyGpsPayloadCache) {
+            renderFlightZones(noflyGpsPayloadCache);
+          } else if (enabled) {
+            refreshFlightZones(viewer);
+          }
+        }
+      },
       get count()    { return entityMap.size; },
       get provider() { return ACTIVE_PROVIDER; },
     };
@@ -1197,6 +1217,17 @@ export async function initFlights(viewer) {
           e.show = shouldShowFlight(acClassification, acType);
         });
         applyFlatIconVisibility();
+      }
+    },
+    setFlightZoneFilter(zoneType, filterEnabled) {
+      const zoneKey = (zoneType ?? '').toLowerCase();
+      if (zoneKey in flightZoneFilters) {
+        flightZoneFilters[zoneKey] = !!filterEnabled;
+        if (noflyGpsPayloadCache) {
+          renderFlightZones(noflyGpsPayloadCache);
+        } else if (enabled) {
+          refreshFlightZones(viewer);
+        }
       }
     },
     get count()    { return entityMap.size; },

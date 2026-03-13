@@ -415,6 +415,133 @@ function drawReticle(viewer) {
   `;
   document.body.appendChild(statusPanel);
 
+  // ── Between crosshair and status: layer selector dock ───────────────────
+  const layersDock = document.createElement('div');
+  layersDock.id = 'hud-layers';
+  layersDock.style.cssText = `
+    position: fixed;
+    left: 0;
+    top: 0;
+    transform: translateX(-50%);
+    pointer-events: auto;
+    z-index: 10;
+  `;
+  layersDock.innerHTML = `
+    <button id="hud-layers-toggle" style="
+      background: rgba(0,0,0,0.55);
+      border: 1px solid rgba(0,255,136,0.28);
+      color: rgba(0,255,136,0.8);
+      font-family: 'Share Tech Mono', 'Courier New', monospace;
+      font-size: 8px;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      padding: 3px 9px;
+      cursor: pointer;
+      border-radius: 2px;
+      backdrop-filter: blur(8px);
+    ">Layers ▾</button>
+    <div id="hud-layers-menu" style="
+      position: absolute;
+      left: 50%;
+      bottom: calc(100% + 6px);
+      transform: translateX(-50%);
+      min-width: 190px;
+      max-height: 62vh;
+      overflow-y: auto;
+      display: none;
+      background: rgba(4,10,18,0.94);
+      border: 1px solid rgba(0,255,136,0.28);
+      border-right: 2px solid rgba(0,255,136,0.7);
+      padding: 8px;
+      backdrop-filter: blur(8px);
+    "></div>
+  `;
+  document.body.appendChild(layersDock);
+
+  const existingLayerPanel = document.getElementById('panel-left');
+  const layersMenu = document.getElementById('hud-layers-menu');
+  if (existingLayerPanel && layersMenu) {
+    existingLayerPanel.style.position = 'static';
+    existingLayerPanel.style.top = 'auto';
+    existingLayerPanel.style.left = 'auto';
+    existingLayerPanel.style.transform = 'none';
+    existingLayerPanel.style.pointerEvents = 'auto';
+    existingLayerPanel.style.gap = '8px';
+    layersMenu.appendChild(existingLayerPanel);
+  }
+
+  // ── Between status and camera: visual filter selector ───────────────────
+  const filtersDock = document.createElement('div');
+  filtersDock.id = 'hud-filters';
+  filtersDock.style.cssText = `
+    position: fixed;
+    left: 0;
+    top: 0;
+    transform: translateX(-50%);
+    pointer-events: auto;
+    z-index: 10;
+  `;
+  filtersDock.innerHTML = `
+    <button id="hud-filters-toggle" style="
+      background: rgba(0,0,0,0.55);
+      border: 1px solid rgba(0,255,136,0.28);
+      color: rgba(0,255,136,0.8);
+      font-family: 'Share Tech Mono', 'Courier New', monospace;
+      font-size: 8px;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      padding: 3px 9px;
+      cursor: pointer;
+      border-radius: 2px;
+      backdrop-filter: blur(8px);
+    ">Filters ▾</button>
+    <div id="hud-filters-menu" hidden style="
+      position: absolute;
+      left: 50%;
+      bottom: calc(100% + 6px);
+      transform: translateX(-50%);
+      min-width: 116px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      background: rgba(4,10,18,0.94);
+      border: 1px solid rgba(0,255,136,0.28);
+      border-right: 2px solid rgba(0,255,136,0.7);
+      padding: 6px;
+      backdrop-filter: blur(8px);
+    ">
+      <button class="shader-option-btn active" data-mode="normal" style="background:rgba(0,0,0,0.48);border:1px solid rgba(0,255,136,0.2);color:rgba(0,255,136,0.85);font-family:'Share Tech Mono', 'Courier New', monospace;font-size:8px;letter-spacing:0.09em;text-transform:uppercase;padding:4px 8px;cursor:pointer;text-align:left;">Normal</button>
+      <button class="shader-option-btn" data-mode="nvg" style="background:rgba(0,0,0,0.48);border:1px solid rgba(0,255,136,0.2);color:rgba(0,255,136,0.65);font-family:'Share Tech Mono', 'Courier New', monospace;font-size:8px;letter-spacing:0.09em;text-transform:uppercase;padding:4px 8px;cursor:pointer;text-align:left;">NVG</button>
+      <button class="shader-option-btn" data-mode="flir" style="background:rgba(0,0,0,0.48);border:1px solid rgba(0,255,136,0.2);color:rgba(0,255,136,0.65);font-family:'Share Tech Mono', 'Courier New', monospace;font-size:8px;letter-spacing:0.09em;text-transform:uppercase;padding:4px 8px;cursor:pointer;text-align:left;">FLIR</button>
+      <button class="shader-option-btn" data-mode="crt" style="background:rgba(0,0,0,0.48);border:1px solid rgba(0,255,136,0.2);color:rgba(0,255,136,0.65);font-family:'Share Tech Mono', 'Courier New', monospace;font-size:8px;letter-spacing:0.09em;text-transform:uppercase;padding:4px 8px;cursor:pointer;text-align:left;">CRT</button>
+    </div>
+  `;
+  document.body.appendChild(filtersDock);
+
+  function positionFiltersDock() {
+    const statusRect = statusPanel.getBoundingClientRect();
+    const cameraRect = zoomPanel.getBoundingClientRect();
+    const x = (statusRect.right + cameraRect.left) / 2;
+    const y = statusRect.top;
+    filtersDock.style.left = `${x}px`;
+    filtersDock.style.top = `${y}px`;
+  }
+
+  positionFiltersDock();
+  window.addEventListener('resize', positionFiltersDock);
+
+  function positionLayersDock() {
+    const coordRect = coordPanel.getBoundingClientRect();
+    const statusRect = statusPanel.getBoundingClientRect();
+    const x = (coordRect.right + statusRect.left) / 2;
+    const y = statusRect.top;
+    layersDock.style.left = `${x}px`;
+    layersDock.style.top = `${y}px`;
+  }
+
+  positionLayersDock();
+  window.addEventListener('resize', positionLayersDock);
+
   // ── Canvas render (reticle + corner brackets) ─────────────────────────────
   function renderCanvas() {
     overlay.width  = canvas.width;
