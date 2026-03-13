@@ -282,7 +282,7 @@ In this mode the proxy now serves cached snapshots for:
 - cameras (`/api/cameras/snapshot`) from server-side tile cache
 - combined world snapshots (`/api/world/snapshot`) for multi-layer fetches
 
-Heavy mode now supports the env-selected flight, satellite, and traffic providers server-side. Map providers still render directly in the browser because tile and 3D globe rendering remain client-side.
+Heavy mode now supports the env-selected flight, satellite, and traffic providers server-side, and also proxies Google/MapTiler tile requests through the local server with on-disk HTTP tile caching (`server/cache/tile-http`). Cesium frame rendering still happens on the client GPU.
 
 The cache is persisted to `server/cache/world-snapshot-cache.json` so warm data can survive a restart.
 

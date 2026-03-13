@@ -9,13 +9,20 @@ import * as Cesium from 'cesium';
 import 'cesium/Build/Cesium/Widgets/widgets.css';
 
 const PROVIDER     = (import.meta.env.VITE_MAP_PROVIDER        ?? 'cesium').toLowerCase();
+const SERVER_HEAVY_MODE = (import.meta.env.VITE_SERVER_HEAVY_MODE ?? 'false').toLowerCase() === 'true';
 const GOOGLE_KEY   =  import.meta.env.VITE_GOOGLE_MAPS_API_KEY ?? '';
 const CESIUM_TOKEN =  import.meta.env.VITE_CESIUM_ION_TOKEN    ?? '';
 const MAPTILER_KEY =  import.meta.env.VITE_MAPTILER_API_KEY    ?? '';
 
-const GOOGLE_TILESET_URL     = `https://tile.googleapis.com/v1/3dtiles/root.json?key=${GOOGLE_KEY}`;
-const MAPTILER_TERRAIN_URL   = `https://api.maptiler.com/tiles/terrain-quantized-mesh-v2/tiles.json?key=${MAPTILER_KEY}`;
-const MAPTILER_SATELLITE_URL = `https://api.maptiler.com/tiles/satellite-v2/{z}/{x}/{y}.jpg?key=${MAPTILER_KEY}`;
+const GOOGLE_TILESET_URL = SERVER_HEAVY_MODE
+  ? '/api/localproxy/tiles/google/v1/3dtiles/root.json'
+  : `https://tile.googleapis.com/v1/3dtiles/root.json?key=${GOOGLE_KEY}`;
+const MAPTILER_TERRAIN_URL = SERVER_HEAVY_MODE
+  ? '/api/localproxy/tiles/maptiler/tiles/terrain-quantized-mesh-v2/tiles.json'
+  : `https://api.maptiler.com/tiles/terrain-quantized-mesh-v2/tiles.json?key=${MAPTILER_KEY}`;
+const MAPTILER_SATELLITE_URL = SERVER_HEAVY_MODE
+  ? '/api/localproxy/tiles/maptiler/tiles/satellite-v2/{z}/{x}/{y}.jpg'
+  : `https://api.maptiler.com/tiles/satellite-v2/{z}/{x}/{y}.jpg?key=${MAPTILER_KEY}`;
 
 // ── Entry point ───────────────────────────────────────────────────────────────
 

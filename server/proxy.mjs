@@ -20,6 +20,7 @@
 import http from 'http';
 import fs from 'fs';
 import path from 'path';
+import crypto from 'crypto';
 import * as satellite from 'satellite.js';
 import { cellToBoundary } from 'h3-js';
 import { feature as topojsonFeature } from 'topojson-client';
@@ -94,6 +95,9 @@ const SNAPSHOT_BOUNDS_GRID_DEG = 0.25;
 const CAMERA_MAX_POINTS = Math.max(parseInt(process.env.SHADOWGRID_CAMERA_MAX_POINTS ?? '6000', 10) || 6000, 1);
 const CACHE_DIR = path.resolve(process.cwd(), 'server', 'cache');
 const CACHE_FILE = path.join(CACHE_DIR, 'world-snapshot-cache.json');
+const TILE_CACHE_DIR = path.join(CACHE_DIR, 'tile-http');
+const TILE_CACHE_TTL_MS = 12 * 60 * 60_000;
+const TILE_CACHE_STALE_MS = 7 * 24 * 60 * 60_000;
 let satCatalogTs = 0;
 /** @type {Array<{id:string,name:string,line1:string,line2:string,satrec:any,meta:any,category:string}>} */
 let satCatalog = [];
@@ -101,6 +105,7 @@ let satCatalogSource = 'unknown';
 let satSnapshotCache = { ts: 0, points: [], source: 'unknown', maxCount: 0, perCategory: SATELLITE_MAX_PER_CATEGORY, categoryKey: 'all' };
 let openSkyToken = '';
 let openSkyTokenExp = 0;
+const tileFetchInFlight = new Map();
 
 const N2YO_SNAPSHOT_TTL_MS = 120_000;
 const N2YO_SAMPLE_POINTS = [
@@ -135,6 +140,161 @@ function ensureCacheDir() {
   if (!fs.existsSync(CACHE_DIR)) {
     fs.mkdirSync(CACHE_DIR, { recursive: true });
   }
+}
+
+function ensureTileCacheDir() {
+  if (!fs.existsSync(TILE_CACHE_DIR)) {
+    fs.mkdirSync(TILE_CACHE_DIR, { recursive: true });
+  }
+}
+
+function tileCachePaths(cacheKey) {
+  return {
+    metaPath: path.join(TILE_CACHE_DIR, `${cacheKey}.json`),
+    bodyPath: path.join(TILE_CACHE_DIR, `${cacheKey}.bin`),
+  };
+}
+
+function readTileCache(cacheKey, maxAgeMs = TILE_CACHE_TTL_MS) {
+  const { metaPath, bodyPath } = tileCachePaths(cacheKey);
+  if (!fs.existsSync(metaPath) || !fs.existsSync(bodyPath)) return null;
+  try {
+    const meta = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
+    const ts = Number(meta?.ts);
+    if (!Number.isFinite(ts)) return null;
+    const ageMs = Date.now() - ts;
+    if (ageMs > maxAgeMs) return null;
+    const body = fs.readFileSync(bodyPath);
+    return { ...meta, body, ageMs };
+  } catch {
+    return null;
+  }
+}
+
+function writeTileCache(cacheKey, payload) {
+  try {
+    ensureTileCacheDir();
+    const { metaPath, bodyPath } = tileCachePaths(cacheKey);
+    const meta = {
+      ts: Date.now(),
+      status: payload.status,
+      contentType: payload.contentType || 'application/octet-stream',
+      cacheControl: payload.cacheControl || 'public, max-age=300',
+      contentLength: payload.body?.byteLength ?? payload.body?.length ?? 0,
+      sourceUrl: payload.sourceUrl,
+    };
+    fs.writeFileSync(bodyPath, payload.body);
+    fs.writeFileSync(metaPath, JSON.stringify(meta));
+  } catch (err) {
+    console.warn(`[proxy] Tile cache write failed: ${err?.message ?? 'unknown'}`);
+  }
+}
+
+function sendBinaryResponse(res, status, headers, body) {
+  res.writeHead(status, headers);
+  res.end(body);
+}
+
+function buildGoogleTileUrl(urlPath, queryParams) {
+  if (!GOOGLE_ROUTES_KEY) {
+    throw new Error('Google Maps API key missing on server');
+  }
+
+  const upstreamPath = urlPath.slice('/tiles/google/'.length);
+  if (!upstreamPath) throw new Error('google tile path missing');
+
+  const upstream = new URL(`https://tile.googleapis.com/${upstreamPath}`);
+  for (const [key, value] of queryParams.entries()) {
+    if (!key || key.toLowerCase() === 'key') continue;
+    upstream.searchParams.set(key, value);
+  }
+  upstream.searchParams.set('key', GOOGLE_ROUTES_KEY);
+  return upstream.toString();
+}
+
+function buildMapTilerTileUrl(urlPath, queryParams) {
+  const key = process.env.VITE_MAPTILER_API_KEY || DOTENV_VARS.get('VITE_MAPTILER_API_KEY') || '';
+  if (!key) {
+    throw new Error('MapTiler API key missing on server');
+  }
+
+  const upstreamPath = urlPath.slice('/tiles/maptiler/'.length);
+  if (!upstreamPath) throw new Error('maptiler tile path missing');
+
+  const upstream = new URL(`https://api.maptiler.com/${upstreamPath}`);
+  for (const [k, value] of queryParams.entries()) {
+    if (!k || k.toLowerCase() === 'key') continue;
+    upstream.searchParams.set(k, value);
+  }
+  upstream.searchParams.set('key', key);
+  return upstream.toString();
+}
+
+async function fetchAndCacheTile(upstreamUrl, cacheKey) {
+  const cached = readTileCache(cacheKey, TILE_CACHE_TTL_MS);
+  if (cached) return { ...cached, cacheHit: true, stale: false };
+
+  const stale = readTileCache(cacheKey, TILE_CACHE_STALE_MS);
+  const inFlight = tileFetchInFlight.get(cacheKey);
+  if (inFlight) return inFlight;
+
+  const promise = (async () => {
+    try {
+      const upstreamResp = await fetch(upstreamUrl, {
+        headers: HEADERS,
+        signal: AbortSignal.timeout(20_000),
+      });
+      if (!upstreamResp.ok) {
+        throw new Error(`tile upstream ${upstreamResp.status}`);
+      }
+
+      const arrayBuffer = await upstreamResp.arrayBuffer();
+      const body = Buffer.from(arrayBuffer);
+      const contentType = upstreamResp.headers.get('content-type') || 'application/octet-stream';
+      const cacheControl = upstreamResp.headers.get('cache-control') || 'public, max-age=300';
+      const payload = {
+        status: 200,
+        contentType,
+        cacheControl,
+        body,
+        sourceUrl: upstreamUrl,
+      };
+      writeTileCache(cacheKey, payload);
+      return { ...payload, cacheHit: false, stale: false, ageMs: 0 };
+    } catch (err) {
+      if (stale) {
+        return { ...stale, cacheHit: true, stale: true };
+      }
+      throw err;
+    } finally {
+      tileFetchInFlight.delete(cacheKey);
+    }
+  })();
+
+  tileFetchInFlight.set(cacheKey, promise);
+  return promise;
+}
+
+async function handleTileProxy(urlPath, queryParams, res) {
+  let upstreamUrl;
+  if (urlPath.startsWith('/tiles/google/')) {
+    upstreamUrl = buildGoogleTileUrl(urlPath, queryParams);
+  } else if (urlPath.startsWith('/tiles/maptiler/')) {
+    upstreamUrl = buildMapTilerTileUrl(urlPath, queryParams);
+  } else {
+    return false;
+  }
+
+  const cacheKey = crypto.createHash('sha1').update(upstreamUrl).digest('hex');
+  const result = await fetchAndCacheTile(upstreamUrl, cacheKey);
+  sendBinaryResponse(res, result.status ?? 200, {
+    'Content-Type': result.contentType || 'application/octet-stream',
+    'Content-Length': String(result.body.length),
+    'Cache-Control': result.cacheControl || 'public, max-age=300',
+    'X-ShadowGrid-Tile-Cache': result.cacheHit ? (result.stale ? 'STALE' : 'HIT') : 'MISS',
+    'X-ShadowGrid-Tile-Age-Ms': `${Math.max(0, Math.floor(result.ageMs ?? 0))}`,
+  }, result.body);
+  return true;
 }
 
 function scheduleCacheWrite() {
@@ -1895,12 +2055,25 @@ async function handleFlights(query, res) {
 const server = http.createServer(async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-  res.setHeader('Content-Type', 'application/json');
   if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
 
   const [path, qs] = req.url.split('?');
-  const query = Object.fromEntries(new URLSearchParams(qs ?? ''));
+  const queryParams = new URLSearchParams(qs ?? '');
+  const query = Object.fromEntries(queryParams);
   const url   = path.replace(/\/$/, '');
+
+  try {
+    if (url.startsWith('/tiles/google/') || url.startsWith('/tiles/maptiler/')) {
+      await handleTileProxy(url, queryParams, res);
+      return;
+    }
+  } catch (err) {
+    res.writeHead(502, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: err?.message ?? 'tile proxy failed' }));
+    return;
+  }
+
+  res.setHeader('Content-Type', 'application/json');
 
   if (url === '/api/flights') {
     await handleFlights(query, res);
@@ -2049,6 +2222,8 @@ const server = http.createServer(async (req, res) => {
       res.end(JSON.stringify({ error: err?.message ?? 'world snapshot failed' }));
     }
   } else if (url === '/health') {
+    ensureTileCacheDir();
+    const tileEntries = fs.readdirSync(TILE_CACHE_DIR).filter(name => name.endsWith('.json')).length;
     res.writeHead(200);
     res.end(JSON.stringify({
       status: 'ok',
@@ -2062,6 +2237,11 @@ const server = http.createServer(async (req, res) => {
         camera_tiles: cameraTileCache.size,
         camera_snapshots: cameraSnapshotCache.size,
       },
+      tileCache: {
+        dir: TILE_CACHE_DIR,
+        entries: tileEntries,
+        ttlMs: TILE_CACHE_TTL_MS,
+      },
     }));
   } else {
     res.writeHead(404);
@@ -2070,6 +2250,7 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(PORT, () => {
+  ensureTileCacheDir();
   loadSnapshotCacheFromDisk();
   console.log(`[proxy] Mode: ${SERVER_HEAVY_MODE ? 'heavy' : 'normal'}`);
   console.log(`[proxy] Providers: flights=${BACKEND_FLIGHT_PROVIDER}, satellites=${BACKEND_SATELLITE_PROVIDER}`);
