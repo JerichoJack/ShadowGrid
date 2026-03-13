@@ -1,25 +1,8 @@
 /**
- * layers/satellites.js
- * Real-time satellite orbital tracking with a switchable TLE data provider.
- *
- * Controlled by VITE_SATELLITE_PROVIDER in your .env:
- *
- *   celestrak    — CelesTrak (free, no key, most widely used)
- *   spacetrack   — Space-Track.org (free account required, US Space Force data)
- *   n2yo         — N2YO.com (free tier, 1000 requests/hr, key required)
- *
- * All providers feed the same satellite.js SGP4 propagator so rendering is
- * identical regardless of source. Falls back to CelesTrak if unconfigured.
- *
- * ⚠️  CelesTrak note (March 2026): Catalog numbers are approaching the 5-digit
- * limit (~69,999). CelesTrak is transitioning to OMM/JSON format for new objects.
- * This file uses the stable GP JSON endpoint which handles both ranges.
- *
- * Docs:
- *   CelesTrak:   https://celestrak.org/NORAD/documentation/gp-data-formats.php
- *   Space-Track: https://www.space-track.org/documentation
- *   N2YO:        https://www.n2yo.com/api/
- *   satellite.js: https://github.com/shashwatak/satellite-js
+ * File: src/layers/satellites.js
+ * Purpose: Real-time satellite orbit visualization with provider-switchable TLE/GP sources.
+ * Providers: CelesTrak, Space-Track, N2YO, plus optional server-heavy snapshot mode.
+ * Last updated: 2026-03-13
  */
 
 import * as Cesium from 'cesium';

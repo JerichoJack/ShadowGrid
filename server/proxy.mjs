@@ -21,6 +21,8 @@ import http from 'http';
 import fs from 'fs';
 import path from 'path';
 import * as satellite from 'satellite.js';
+import { cellToBoundary } from 'h3-js';
+import { feature as topojsonFeature } from 'topojson-client';
 
 const PORT       = 3001;
 const RADIUS_NM  = 250;
@@ -72,6 +74,22 @@ const FLIGHT_SNAPSHOT_TTL_MS = SERVER_HEAVY_MODE ? 3_000 : 1_500;
 const CAMERA_MANIFEST_TTL_MS = 10 * 60_000;
 const CAMERA_TILE_CACHE_TTL_MS = 15 * 60_000;
 const CAMERA_SNAPSHOT_TTL_MS = 8_000;
+const OVERLAY_SNAPSHOT_TTL_MS = 5 * 60_000;
+const OVERLAY_MAX_FLIGHT_HEIGHT_M = 18_000;
+const FAA_TFR_WFS_URL = 'https://tfr.faa.gov/geoserver/TFR/ows?service=WFS&version=1.1.0&request=GetFeature&typeName=TFR:V_TFR_LOC&maxFeatures=300&outputFormat=application/json&srsname=EPSG:4326';
+const FAA_TFR_LIST_URL = 'https://tfr.faa.gov/tfrapi/getTfrList';
+const SAFE_AIRSPACE_MAP_URL = 'https://safeairspace.net/map/';
+const GPSJAM_MANIFEST_URL = 'https://gpsjam.org/data/manifest.csv';
+const GPSJAM_DATA_BASE_URL = 'https://gpsjam.org/data';
+const OVERPASS_ENDPOINTS = [
+  'https://overpass-api.de/api/interpreter',
+  'https://overpass.kumi.systems/api/interpreter',
+  'https://lz4.overpass-api.de/api/interpreter',
+];
+const IODA_API_BASE_URL = 'https://api.ioda.inetintel.cc.gatech.edu/v2';
+const IODA_BLACKOUT_LOOKBACK_SEC = 24 * 60 * 60;
+const IODA_COUNTRY_SUMMARY_LIMIT = 300;
+const IODA_EVENT_ENRICH_LIMIT = 24;
 const SNAPSHOT_BOUNDS_GRID_DEG = 0.25;
 const CAMERA_MAX_POINTS = Math.max(parseInt(process.env.SHADOWGRID_CAMERA_MAX_POINTS ?? '6000', 10) || 6000, 1);
 const CACHE_DIR = path.resolve(process.cwd(), 'server', 'cache');
@@ -108,6 +126,8 @@ let cameraManifestCache = { ts: 0, tileDeg: 5, tiles: [] };
 const cameraTileCache = new Map();
 /** @type {Map<string, {ts:number, payload:any}>} */
 const cameraSnapshotCache = new Map();
+/** @type {Map<string, {ts:number, payload:any}>} */
+const overlaySnapshotCache = new Map();
 
 let cacheWriteTimer = null;
 
@@ -984,6 +1004,718 @@ async function getTrafficPayload(bounds) {
   return payload;
 }
 
+async function fetchJson(url, timeoutMs = 20_000) {
+  const resp = await fetch(url, {
+    headers: HEADERS,
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+  if (!resp.ok) {
+    throw new Error(`${url} ${resp.status}`);
+  }
+  return resp.json();
+}
+
+async function fetchText(url, timeoutMs = 20_000) {
+  const resp = await fetch(url, {
+    headers: HEADERS,
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+  if (!resp.ok) {
+    throw new Error(`${url} ${resp.status}`);
+  }
+  return resp.text();
+}
+
+function parseCsv(text) {
+  const lines = text.trim().split(/\r?\n/).filter(Boolean);
+  if (!lines.length) return [];
+  const headers = lines[0].split(',').map(cell => cell.trim());
+  return lines.slice(1).map((line) => {
+    const values = line.split(',');
+    return Object.fromEntries(headers.map((header, index) => [header, (values[index] ?? '').trim()]));
+  });
+}
+
+function toIsoString(value) {
+  if (value == null) return null;
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return new Date(value * 1000).toISOString();
+  }
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? new Date(parsed).toISOString() : null;
+}
+
+function stripClosedRing(points) {
+  if (points.length < 2) return points;
+  const [firstLon, firstLat] = points[0];
+  const [lastLon, lastLat] = points[points.length - 1];
+  if (firstLon === lastLon && firstLat === lastLat) {
+    return points.slice(0, -1);
+  }
+  return points;
+}
+
+function sanitizePoints(points) {
+  return stripClosedRing(points.filter(([lon, lat]) => Number.isFinite(lon) && Number.isFinite(lat)));
+}
+
+function geometryToOuterRings(geometry) {
+  if (!geometry) return [];
+  if (geometry.type === 'Polygon') {
+    return geometry.coordinates.slice(0, 1);
+  }
+  if (geometry.type === 'MultiPolygon') {
+    return geometry.coordinates.map(poly => poly[0]).filter(Boolean);
+  }
+  return [];
+}
+
+function getSummaryOverall(summary) {
+  return Number(summary?.scores?.overall ?? 0);
+}
+
+function formatCompactNumber(value) {
+  if (!Number.isFinite(value)) return '0';
+  return new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 }).format(value);
+}
+
+function inferFaaSeverity(text) {
+  return /vip|president|presidential|special security|security|space|rocket|hazard/i.test(text)
+    ? 'high'
+    : 'medium';
+}
+
+function parseAltitudeTokenMeters(rawToken, { isUpper = false } = {}) {
+  if (rawToken == null) return null;
+  const token = String(rawToken).trim().toUpperCase();
+  if (!token) return null;
+
+  if (/^(SFC|SURFACE|GND|GROUND)$/.test(token)) return 0;
+  if (/^(UNL|UNLIMITED|ABOVE)$/.test(token)) return isUpper ? OVERLAY_MAX_FLIGHT_HEIGHT_M : null;
+
+  const flMatch = token.match(/^FL\s*(\d{2,3})$/i);
+  if (flMatch) {
+    const flightLevel = Number(flMatch[1]);
+    return Number.isFinite(flightLevel) ? flightLevel * 100 * 0.3048 : null;
+  }
+
+  const numUnitMatch = token.match(/^(\d+(?:\.\d+)?)\s*(FT|FEET|F|M|METER|METERS|KM)?$/i);
+  if (!numUnitMatch) return null;
+
+  const value = Number(numUnitMatch[1]);
+  if (!Number.isFinite(value)) return null;
+  const unit = (numUnitMatch[2] ?? 'FT').toUpperCase();
+  if (unit === 'KM') return value * 1000;
+  if (unit.startsWith('M')) return value;
+  return value * 0.3048;
+}
+
+function pickFirstAltitudeMeters(candidates, options = {}) {
+  for (const candidate of candidates) {
+    const meters = parseAltitudeTokenMeters(candidate, options);
+    if (Number.isFinite(meters)) return meters;
+  }
+  return null;
+}
+
+function parseAltitudeRangeMetersFromText(text) {
+  const src = String(text ?? '');
+  if (!src.trim()) return { floorMeters: null, ceilingMeters: null };
+
+  const token = '(?:SFC|SURFACE|GND|GROUND|UNL|UNLIMITED|FL\\s*\\d{2,3}|\\d+(?:\\.\\d+)?\\s*(?:FT|FEET|F|M|METER|METERS|KM)?)';
+  const rangeRe = new RegExp(`(${token})\\s*(?:-|TO|THRU|THROUGH)\\s*(${token})`, 'i');
+  const match = src.toUpperCase().match(rangeRe);
+  if (!match) return { floorMeters: null, ceilingMeters: null };
+
+  const floorMeters = parseAltitudeTokenMeters(match[1], { isUpper: false });
+  const ceilingMeters = parseAltitudeTokenMeters(match[2], { isUpper: true });
+  return { floorMeters, ceilingMeters };
+}
+
+function normalizeVerticalBoundsMeters(floorMeters, ceilingMeters) {
+  const floor = Number.isFinite(floorMeters) ? Math.max(0, floorMeters) : null;
+  let ceiling = Number.isFinite(ceilingMeters) ? Math.max(0, ceilingMeters) : null;
+
+  if (Number.isFinite(floor) && Number.isFinite(ceiling) && ceiling <= floor) {
+    ceiling = null;
+  }
+
+  return {
+    floorMeters: floor,
+    ceilingMeters: ceiling,
+  };
+}
+
+async function loadFaaFlightRestrictions() {
+  try {
+    const [geoJson, list] = await Promise.all([
+      fetchJson(FAA_TFR_WFS_URL),
+      fetchJson(FAA_TFR_LIST_URL),
+    ]);
+    const listByGid = new Map((Array.isArray(list) ? list : []).map(item => [String(item.gid), item]));
+    const features = Array.isArray(geoJson?.features) ? geoJson.features : [];
+
+    return features.flatMap((feature, featureIndex) => {
+      const properties = feature?.properties ?? {};
+      const listItem = listByGid.get(String(properties.GID));
+      const title = properties.TITLE || listItem?.description || listItem?.notam_id || `FAA TFR ${featureIndex + 1}`;
+      const description = listItem?.description || properties.LEGAL || 'FAA temporary flight restriction.';
+      const updatedAt = toIsoString(listItem?.mod_abs_time || properties.LAST_MODIFICATION_DATETIME);
+      const pointsSets = geometryToOuterRings(feature?.geometry);
+      const altitudeText = `${title} ${description} ${properties.LEGAL ?? ''}`;
+      const parsedRange = parseAltitudeRangeMetersFromText(altitudeText);
+
+      const floorMeters = pickFirstAltitudeMeters([
+        properties.LOWER_VAL,
+        properties.LOWER,
+        properties.FLOOR,
+        listItem?.lower_alt,
+        listItem?.lower,
+      ]) ?? parsedRange.floorMeters;
+
+      const ceilingMeters = pickFirstAltitudeMeters([
+        properties.UPPER_VAL,
+        properties.UPPER,
+        properties.CEILING,
+        listItem?.upper_alt,
+        listItem?.upper,
+      ], { isUpper: true }) ?? parsedRange.ceilingMeters;
+
+      const vertical = normalizeVerticalBoundsMeters(floorMeters, ceilingMeters);
+
+      return pointsSets.map((ring, ringIndex) => {
+        const points = sanitizePoints((ring ?? []).map(([lon, lat]) => [Number(lon), Number(lat)]));
+        if (points.length < 3) return null;
+
+        const severity = inferFaaSeverity(`${title} ${description}`);
+        return {
+          id: `faa-${properties.NOTAM_KEY ?? properties.GID ?? featureIndex}-${ringIndex}`,
+          name: title,
+          zoneType: 'tfr',
+          severity,
+          source: 'FAA TFR WFS + TFR API',
+          status: 'active',
+          startsAt: null,
+          endsAt: null,
+          updatedAt,
+          observedAt: updatedAt,
+          floorMeters: vertical.floorMeters,
+          ceilingMeters: vertical.ceilingMeters,
+          points,
+          summary: description,
+        };
+      }).filter(Boolean);
+    });
+  } catch (error) {
+    console.warn(`[proxy] FAA TFR fetch failed: ${error?.message ?? 'unknown'}`);
+    return [];
+  }
+}
+
+function overpassTag(tagValue = '') {
+  return String(tagValue).replace(/"/g, '\\"');
+}
+
+function overpassAirspaceQuery(bounds) {
+  if (!Array.isArray(bounds) || bounds.length !== 4) return null;
+  const [minLon, minLat, maxLon, maxLat] = bounds;
+  const airspaceFilter = 'restricted|prohibited|danger|no_drone|temporary';
+  return `
+    [out:json][timeout:25];
+    (
+      way["boundary"="airspace"]["airspace"~"^(${overpassTag(airspaceFilter)})$"](${minLat},${minLon},${maxLat},${maxLon});
+      relation["boundary"="airspace"]["airspace"~"^(${overpassTag(airspaceFilter)})$"](${minLat},${minLon},${maxLat},${maxLon});
+    );
+    out geom;
+  `;
+}
+
+function boundsSpan(bounds) {
+  if (!Array.isArray(bounds) || bounds.length !== 4) return null;
+  const [minLon, minLat, maxLon, maxLat] = bounds;
+  let lonSpan = maxLon - minLon;
+  if (lonSpan < 0) lonSpan += 360;
+  const latSpan = Math.max(0, maxLat - minLat);
+  return { lonSpan, latSpan };
+}
+
+function shouldFetchGlobalAirspace(bounds) {
+  const span = boundsSpan(bounds);
+  if (!span) return false;
+  const approxAreaDeg2 = span.lonSpan * span.latSpan;
+  // Overpass becomes unreliable for very broad extents; defer until user zooms in.
+  if (span.lonSpan > 120 || span.latSpan > 70) return false;
+  if (approxAreaDeg2 > 1800) return false;
+  return true;
+}
+
+async function fetchOverpassJson(query, timeoutMs = 25_000) {
+  let lastError = null;
+  for (const endpoint of OVERPASS_ENDPOINTS) {
+    try {
+      const resp = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain', ...HEADERS },
+        body: query,
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+      if (!resp.ok) {
+        lastError = new Error(`Overpass ${resp.status} @ ${endpoint}`);
+        continue;
+      }
+      return await resp.json();
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError ?? new Error('Overpass request failed');
+}
+
+function mapOsmAirspaceTypeToSeverity(airspaceType = '') {
+  const type = String(airspaceType).toLowerCase();
+  if (type === 'prohibited' || type === 'restricted') return 'high';
+  return 'medium';
+}
+
+function parseOsmAltitude(tags = {}, keys = [], options = {}) {
+  const values = keys
+    .map((key) => tags?.[key])
+    .filter((value) => value != null && String(value).trim() !== '');
+  return pickFirstAltitudeMeters(values, options);
+}
+
+function buildOsmAirspaceZone(id, tags, points, nowIso) {
+  const airspaceType = String(tags?.airspace ?? 'restricted').toLowerCase();
+  const sourceName = tags?.source || 'OpenStreetMap airspace';
+  const desc = tags?.description || tags?.note || tags?.name || '';
+
+  const floorMeters = parseOsmAltitude(tags, ['lower', 'lower_limit', 'lower:altitude', 'floor', 'min_height']);
+  const ceilingMeters = parseOsmAltitude(tags, ['upper', 'upper_limit', 'upper:altitude', 'ceiling', 'max_height'], { isUpper: true });
+  const vertical = normalizeVerticalBoundsMeters(floorMeters, ceilingMeters);
+
+  return {
+    id,
+    name: tags?.name || `OSM ${airspaceType} airspace`,
+    zoneType: airspaceType,
+    severity: mapOsmAirspaceTypeToSeverity(airspaceType),
+    source: sourceName,
+    status: 'active',
+    startsAt: null,
+    endsAt: null,
+    updatedAt: nowIso,
+    observedAt: nowIso,
+    floorMeters: vertical.floorMeters,
+    ceilingMeters: vertical.ceilingMeters,
+    points,
+    summary: desc,
+  };
+}
+
+async function loadGlobalOsmFlightRestrictions(bounds) {
+  const normalizedBounds = normalizeBounds(bounds);
+  if (!normalizedBounds) return [];
+  if (!shouldFetchGlobalAirspace(normalizedBounds)) return [];
+
+  try {
+    const query = overpassAirspaceQuery(normalizedBounds);
+    if (!query) return [];
+
+    const payload = await fetchOverpassJson(query, 25_000);
+    const elements = Array.isArray(payload?.elements) ? payload.elements : [];
+    const nowIso = new Date().toISOString();
+    const zones = [];
+
+    for (const el of elements) {
+      const tags = el?.tags ?? {};
+      const airspaceType = String(tags?.airspace ?? '').toLowerCase();
+      if (!['restricted', 'prohibited', 'danger', 'no_drone', 'temporary'].includes(airspaceType)) continue;
+
+      if (el?.type === 'way' && Array.isArray(el?.geometry)) {
+        const points = sanitizePoints(el.geometry.map((node) => [Number(node.lon), Number(node.lat)]));
+        if (points.length < 3) continue;
+        zones.push(buildOsmAirspaceZone(`osm-way-${el.id}`, tags, points, nowIso));
+        continue;
+      }
+
+      if (el?.type === 'relation' && Array.isArray(el?.members)) {
+        let ringIndex = 0;
+        for (const member of el.members) {
+          if (member?.role !== 'outer' || !Array.isArray(member?.geometry)) continue;
+          const points = sanitizePoints(member.geometry.map((node) => [Number(node.lon), Number(node.lat)]));
+          if (points.length < 3) continue;
+          zones.push(buildOsmAirspaceZone(`osm-rel-${el.id}-${ringIndex}`, tags, points, nowIso));
+          ringIndex += 1;
+        }
+      }
+    }
+
+    return zones;
+  } catch (error) {
+    console.warn(`[proxy] Global OSM airspace fetch failed (non-fatal): ${error?.message ?? 'unknown'}`);
+    return [];
+  }
+}
+
+async function loadGpsJamInterference() {
+  try {
+    const manifestRows = parseCsv(await fetchText(GPSJAM_MANIFEST_URL));
+    const latestDate = manifestRows.length ? manifestRows[manifestRows.length - 1].date : null;
+    if (!latestDate) return [];
+
+    const rows = parseCsv(await fetchText(`${GPSJAM_DATA_BASE_URL}/${latestDate}-h3_4.csv`));
+    const observedAt = `${latestDate}T23:59:59.000Z`;
+
+    return rows.flatMap((row) => {
+      const hex = row.hex;
+      const countGood = Number(row.count_good_aircraft ?? 0);
+      const countBad = Number(row.count_bad_aircraft ?? 0);
+      const total = countGood + countBad;
+      if (!hex || !Number.isFinite(total) || total <= 0 || !Number.isFinite(countBad)) return [];
+
+      const pctBad = (countBad / total) * 100;
+      if (pctBad <= 2) return [];
+
+      const severity = pctBad > 10 ? 'high' : 'medium';
+      const points = sanitizePoints(cellToBoundary(hex).map(([lat, lon]) => [Number(lon), Number(lat)]));
+      if (points.length < 3) return [];
+
+      return [{
+        id: `gpsjam-${hex}`,
+        name: `GPS interference ${severity.toUpperCase()} (${pctBad.toFixed(1)}%)`,
+        zoneType: 'gps',
+        severity,
+        source: 'GPSJam',
+        status: 'active',
+        startsAt: `${latestDate}T00:00:00.000Z`,
+        endsAt: observedAt,
+        updatedAt: observedAt,
+        observedAt,
+        floorMeters: 0,
+        ceilingMeters: OVERLAY_MAX_FLIGHT_HEIGHT_M,
+        points,
+        summary: `${countBad} suspect aircraft out of ${total} observed aircraft in this H3 cell.`,
+      }];
+    });
+  } catch (error) {
+    console.warn(`[proxy] GPSJam fetch failed: ${error?.message ?? 'unknown'}`);
+    return [];
+  }
+}
+
+function buildCountryFeatureMap(topoPayload) {
+  const topology = topoPayload?.data?.topology;
+  const objectKey = topology ? Object.keys(topology.objects ?? {})[0] : null;
+  const idField = topoPayload?.data?.idField ?? 'usercode';
+  if (!topology || !objectKey) return new Map();
+
+  const collection = topojsonFeature(topology, topology.objects[objectKey]);
+  const features = Array.isArray(collection?.features) ? collection.features : [];
+  return new Map(features.map(feature => [String(feature?.properties?.[idField] ?? '').toUpperCase(), feature]));
+}
+
+function normalizeCountryNameKey(name) {
+  return String(name ?? '')
+    .toLowerCase()
+    .replace(/&amp;/g, 'and')
+    .replace(/[^a-z0-9]+/g, '');
+}
+
+function countryNameAliases() {
+  return new Map([
+    ['congodrc', 'demrepcongo'],
+    ['drcongo', 'demrepcongo'],
+    ['democraticrepublicofthecongo', 'demrepcongo'],
+    ['curacao', 'curacao'],
+    ['puertorico', 'puertorico'],
+    ['northkorea', 'northkorea'],
+    ['southkorea', 'southkorea'],
+    ['southsudan', 'southsudan'],
+    ['westernsahara', 'westernsahara'],
+  ]);
+}
+
+function buildCountryFeatureMapByName(topoPayload) {
+  const topology = topoPayload?.data?.topology;
+  const objectKey = topology ? Object.keys(topology.objects ?? {})[0] : null;
+  if (!topology || !objectKey) return new Map();
+
+  const collection = topojsonFeature(topology, topology.objects[objectKey]);
+  const features = Array.isArray(collection?.features) ? collection.features : [];
+  const aliases = countryNameAliases();
+  const out = new Map();
+
+  for (const feature of features) {
+    const rawName = String(feature?.properties?.name ?? '');
+    const normalized = normalizeCountryNameKey(rawName);
+    if (normalized) out.set(normalized, feature);
+
+    const aliasEntry = [...aliases.entries()].find(([, target]) => target === normalized);
+    if (aliasEntry) out.set(aliasEntry[0], feature);
+  }
+
+  return out;
+}
+
+function decodeHtmlEntities(text) {
+  return String(text ?? '')
+    .replace(/&#(\d+);/g, (_, dec) => String.fromCharCode(Number(dec)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&#8211;|&ndash;/g, '-')
+    .replace(/&#8212;|&mdash;/g, '-')
+    .replace(/&#8217;|&#039;|&apos;/g, "'")
+    .replace(/&#8220;|&#8221;|&quot;/g, '"')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>');
+}
+
+function stripHtml(text) {
+  return decodeHtmlEntities(String(text ?? ''))
+    .replace(/<br\s*\/?>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function warningLevelToSeverity(level) {
+  const normalized = String(level ?? '').trim();
+  if (normalized === '1') return 'high';
+  if (normalized === '2') return 'medium';
+  return 'low';
+}
+
+function parseSafeAirspaceFeedItems(html) {
+  const items = [];
+  const regex = /<div class="feed-item[^\"]*"[^>]*data-feed-item-country="([^"]+)"[^>]*data-feed-item-warn-level="([^"]+)"[^>]*>([\s\S]*?)<a href="([^"]+)" class="feed-item-link-overlay"><\/a>[\s\S]*?<\/div><!-- \.feed-item -->/g;
+  let match;
+  while ((match = regex.exec(html)) !== null) {
+    const [, countryRaw, levelRaw, innerHtml, href] = match;
+    const levelLabelMatch = innerHtml.match(/<span class="feed-item-level">([\s\S]*?)<\/span>/i);
+    const summaryMatch = innerHtml.match(/<div class="feed-item-summary">([\s\S]*?)<div class="feed-item-summary-fade"><\/div>/i);
+    items.push({
+      country: decodeHtmlEntities(countryRaw).trim(),
+      level: String(levelRaw).trim(),
+      levelLabel: stripHtml(levelLabelMatch?.[1] ?? ''),
+      summary: stripHtml(summaryMatch?.[1] ?? ''),
+      href: decodeHtmlEntities(href).trim(),
+    });
+  }
+  return items;
+}
+
+function pointsBounds(points) {
+  if (!Array.isArray(points) || !points.length) return null;
+  let minLon = Infinity;
+  let minLat = Infinity;
+  let maxLon = -Infinity;
+  let maxLat = -Infinity;
+  for (const [lon, lat] of points) {
+    minLon = Math.min(minLon, lon);
+    minLat = Math.min(minLat, lat);
+    maxLon = Math.max(maxLon, lon);
+    maxLat = Math.max(maxLat, lat);
+  }
+  return [minLon, minLat, maxLon, maxLat];
+}
+
+function boundsIntersect(a, b) {
+  if (!a || !b) return true;
+  const [aMinLon, aMinLat, aMaxLon, aMaxLat] = a;
+  const [bMinLon, bMinLat, bMaxLon, bMaxLat] = b;
+  return !(aMaxLon < bMinLon || aMinLon > bMaxLon || aMaxLat < bMinLat || aMinLat > bMaxLat);
+}
+
+async function loadSafeAirspaceWarnings(bounds) {
+  try {
+    const [html, topoPayload] = await Promise.all([
+      fetchText(SAFE_AIRSPACE_MAP_URL),
+      fetchJson(`${IODA_API_BASE_URL}/topo/country`),
+    ]);
+    const items = parseSafeAirspaceFeedItems(html);
+    const featureMap = buildCountryFeatureMapByName(topoPayload);
+    const normalizedBounds = normalizeBounds(bounds);
+    const zones = [];
+
+    for (const item of items) {
+      const lookupKey = countryNameAliases().get(normalizeCountryNameKey(item.country)) ?? normalizeCountryNameKey(item.country);
+      const feature = featureMap.get(lookupKey);
+      if (!feature) continue;
+
+      const rings = geometryToOuterRings(feature.geometry);
+      let ringIndex = 0;
+      for (const ring of rings) {
+        const points = sanitizePoints((ring ?? []).map(([lon, lat]) => [Number(lon), Number(lat)]));
+        if (points.length < 3) continue;
+        if (normalizedBounds && !boundsIntersect(pointsBounds(points), normalizedBounds)) continue;
+
+        zones.push({
+          id: `safeairspace-${lookupKey}-${ringIndex}`,
+          name: item.country,
+          zoneType: 'safeairspace',
+          severity: warningLevelToSeverity(item.level),
+          source: 'Safe Airspace',
+          status: item.levelLabel || 'active',
+          startsAt: null,
+          endsAt: null,
+          updatedAt: null,
+          observedAt: null,
+          floorMeters: 0,
+          ceilingMeters: OVERLAY_MAX_FLIGHT_HEIGHT_M,
+          points,
+          summary: `${item.levelLabel}${item.summary ? `: ${item.summary}` : ''}`.trim(),
+          linkUrl: item.href,
+        });
+        ringIndex += 1;
+      }
+    }
+
+    return zones;
+  } catch (error) {
+    console.warn(`[proxy] Safe Airspace fetch failed: ${error?.message ?? 'unknown'}`);
+    return [];
+  }
+}
+
+function inferIodaSeverity(overallScore) {
+  return overallScore >= 10_000_000 ? 'high' : 'medium';
+}
+
+async function loadIodaBlackouts() {
+  try {
+    const until = Math.floor(Date.now() / 1000);
+    const from = until - IODA_BLACKOUT_LOOKBACK_SEC;
+    const [summaryPayload, topoPayload] = await Promise.all([
+      fetchJson(`${IODA_API_BASE_URL}/outages/summary?entityType=country&from=${from}&until=${until}&limit=${IODA_COUNTRY_SUMMARY_LIMIT}`),
+      fetchJson(`${IODA_API_BASE_URL}/topo/country`),
+    ]);
+
+    const countryFeatureMap = buildCountryFeatureMap(topoPayload);
+    const summaries = Array.isArray(summaryPayload?.data) ? summaryPayload.data : [];
+    const rankedSummaries = summaries
+      .map((summary) => {
+        const code = String(summary?.entity?.code ?? '').toUpperCase();
+        return {
+          code,
+          overallScore: getSummaryOverall(summary),
+          summary,
+        };
+      })
+      .filter(({ code, overallScore }) => overallScore > 0 && countryFeatureMap.has(code))
+      .sort((left, right) => right.overallScore - left.overallScore);
+
+    const eventSets = await Promise.all(rankedSummaries.slice(0, IODA_EVENT_ENRICH_LIMIT).map(async ({ code, summary }) => {
+      const encodedCode = encodeURIComponent(code);
+      try {
+        const payload = await fetchJson(`${IODA_API_BASE_URL}/outages/events?entityType=country&entityCode=${encodedCode}&from=${from}&until=${until}&limit=10&format=ioda`);
+        return [code, { summary, events: Array.isArray(payload?.data) ? payload.data : [] }];
+      } catch {
+        return [code, { summary, events: [] }];
+      }
+    }));
+    const eventsByCode = new Map(eventSets);
+
+    const totalSeverityScore = rankedSummaries.reduce((sum, item) => sum + item.overallScore, 0);
+    const globalSummary = {
+      from: toIsoString(from),
+      until: toIsoString(until),
+      totalSeverityScore,
+      countryCount: rankedSummaries.length,
+      countries: rankedSummaries.slice(0, 100).map(({ summary, overallScore, code }) => ({
+        code,
+        name: summary?.entity?.name ?? code,
+        score: overallScore,
+        eventCount: Number(summary?.event_cnt ?? 0),
+      })),
+    };
+
+    const blackouts = rankedSummaries.flatMap(({ code, overallScore, summary }) => {
+      const feature = countryFeatureMap.get(code);
+      if (!feature) return [];
+      const events = eventsByCode.get(code)?.events ?? [];
+
+      const primaryEvent = [...events].sort((left, right) => {
+        const scoreDelta = Number(right?.score ?? 0) - Number(left?.score ?? 0);
+        if (scoreDelta !== 0) return scoreDelta;
+        return Number(right?.until ?? 0) - Number(left?.until ?? 0);
+      })[0] ?? null;
+
+      const activeWindow = primaryEvent
+        ? `${new Date(primaryEvent.from * 1000).toISOString()} to ${new Date(primaryEvent.until * 1000).toISOString()}`
+        : 'Recent 24h summary';
+      const sourceLabels = Object.keys(summary?.scores ?? {}).filter(key => key !== 'overall');
+      const pointsSets = geometryToOuterRings(feature.geometry);
+
+      return pointsSets.map((ring, ringIndex) => {
+        const points = sanitizePoints((ring ?? []).map(([lon, lat]) => [Number(lon), Number(lat)]));
+        if (points.length < 3) return null;
+
+        return {
+          id: `ioda-${code}-${ringIndex}`,
+          name: summary.entity.name,
+          outageType: 'blackout',
+          severity: inferIodaSeverity(overallScore),
+          outageScore: overallScore,
+          source: 'IODA (Georgia Tech)',
+          status: primaryEvent && primaryEvent.until >= Math.floor(Date.now() / 1000) ? 'active' : 'recent',
+          startsAt: primaryEvent ? toIsoString(primaryEvent.from) : null,
+          endsAt: primaryEvent ? toIsoString(primaryEvent.until) : null,
+          updatedAt: primaryEvent ? toIsoString(primaryEvent.until) : null,
+          observedAt: primaryEvent ? toIsoString(primaryEvent.until) : null,
+          floorMeters: 0,
+          ceilingMeters: OVERLAY_MAX_FLIGHT_HEIGHT_M,
+          points,
+          asnScope: sourceLabels.join(', '),
+          summary: `Country-scale connectivity outage score ${formatCompactNumber(overallScore)} over the last 24 hours. Signals: ${sourceLabels.join(', ') || 'none'}. Window: ${activeWindow}.`,
+        };
+      }).filter(Boolean);
+    });
+
+    return {
+      blackouts,
+      globalSummary,
+    };
+  } catch (error) {
+    console.warn(`[proxy] IODA blackout fetch failed: ${error?.message ?? 'unknown'}`);
+    return {
+      blackouts: [],
+      globalSummary: null,
+    };
+  }
+}
+
+async function getOverlayPayload(bounds = null) {
+  const now = Date.now();
+  const normalizedBounds = normalizeBounds(bounds);
+  const cacheKey = normalizedBounds ? `overlay:${boundsCacheKey(normalizedBounds, 'overlay-global')}` : 'overlay-global';
+  const cached = overlaySnapshotCache.get(cacheKey);
+  if (cached && (now - cached.ts) < OVERLAY_SNAPSHOT_TTL_MS) {
+    return { ...cached.payload, cacheHit: true };
+  }
+
+  const [faaFlightRestrictions, gpsInterference, internetOutageData, globalFlightRestrictions] = await Promise.all([
+    loadFaaFlightRestrictions(),
+    loadGpsJamInterference(),
+    loadIodaBlackouts(),
+    loadSafeAirspaceWarnings(normalizedBounds),
+  ]);
+
+  const flightRestrictions = [...faaFlightRestrictions, ...globalFlightRestrictions];
+
+  const payload = {
+    ts: now,
+    maxFlightHeightMeters: OVERLAY_MAX_FLIGHT_HEIGHT_M,
+    flightRestrictions,
+    gpsInterference,
+    internetBlackouts: internetOutageData.blackouts,
+    internetGlobalSummary: internetOutageData.globalSummary,
+    cacheHit: false,
+  };
+
+  overlaySnapshotCache.set(cacheKey, { ts: now, payload });
+  return payload;
+}
+
 // ── Aircraft database ─────────────────────────────────────────────────────────
 /** @type {Map<string, object>} */
 const db = new Map();
@@ -1172,6 +1904,39 @@ const server = http.createServer(async (req, res) => {
 
   if (url === '/api/flights') {
     await handleFlights(query, res);
+  } else if (url === '/api/nofly_gps') {
+    try {
+      const parts = (query.bounds ?? '').split(',').map(Number);
+      const bounds = (parts.length === 4 && parts.every(n => Number.isFinite(n))) ? parts : null;
+      const payload = await getOverlayPayload(bounds);
+      res.writeHead(200);
+      res.end(JSON.stringify({
+        ts: payload.ts,
+        maxFlightHeightMeters: payload.maxFlightHeightMeters,
+        flightRestrictions: payload.flightRestrictions,
+        gpsInterference: payload.gpsInterference,
+        cacheHit: payload.cacheHit,
+      }));
+    } catch (err) {
+      res.writeHead(502);
+      res.end(JSON.stringify({ error: err?.message ?? 'nofly_gps request failed' }));
+    }
+  } else if (url === '/api/internet') {
+    try {
+      const parts = (query.bounds ?? '').split(',').map(Number);
+      const bounds = (parts.length === 4 && parts.every(n => Number.isFinite(n))) ? parts : null;
+      const payload = await getOverlayPayload(bounds);
+      res.writeHead(200);
+      res.end(JSON.stringify({
+        ts: payload.ts,
+        maxFlightHeightMeters: payload.maxFlightHeightMeters,
+        internetBlackouts: payload.internetBlackouts,
+        cacheHit: payload.cacheHit,
+      }));
+    } catch (err) {
+      res.writeHead(502);
+      res.end(JSON.stringify({ error: err?.message ?? 'internet request failed' }));
+    }
   } else if (url === '/api/traffic/google') {
     const parts = (query.bounds ?? '').split(',').map(Number);
     if (parts.length !== 4 || parts.some(n => !Number.isFinite(n))) {

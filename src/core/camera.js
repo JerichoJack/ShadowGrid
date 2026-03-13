@@ -1,7 +1,8 @@
 /**
- * core/camera.js
- * Sets up the initial camera position and navigation feel.
- * Exposes flyTo() for programmatic camera moves.
+ * File: src/core/camera.js
+ * Purpose: Initializes startup camera position and exposes shared camera helpers.
+ * Notes: Supports optional IP-based startup geolocation with env fallbacks.
+ * Last updated: 2026-03-13
  */
 
 import * as Cesium from 'cesium';

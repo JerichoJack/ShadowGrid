@@ -1,10 +1,8 @@
 /**
- * ui/HUD.js
- * Targeting reticle + rich aircraft info panel (adsb.lol style).
- *
- * Click panel fetches live enrichment from:
- *   - adsbdb.com  — registration, type, operator, route
- *   - hexdb.io    — fallback for registration + type
+ * File: src/ui/HUD.js
+ * Purpose: Main HUD composition (status, info panels, clock, and follow interactions).
+ * Notes: Includes aircraft enrichment and subsystem health surfacing.
+ * Last updated: 2026-03-13
  */
 
 import * as Cesium from 'cesium';
@@ -101,10 +99,11 @@ export function initHUD(viewer) {
     }
   }
 
-  // When follow is cancelled externally (user pans), update the panel button
+  // When follow is cancelled externally (user pans), update any open panel buttons.
   window.addEventListener('shadowgrid:unfollow', () => {
-    const btn = document.getElementById('follow-btn');
-    if (btn) setFollowBtnState(btn, false);
+    document.querySelectorAll('#follow-btn, [data-satellite-index]').forEach((btn) => {
+      setFollowBtnState(btn, false);
+    });
   });
 }
 
@@ -212,10 +211,12 @@ let _hudViewer = null;
 
 function drawReticle(viewer) {
   _hudViewer = viewer;
+  let crosshairHidden = false;
 
   // ── Canvas overlay (reticle + corner brackets) ────────────────────────────
   const canvas  = viewer.canvas;
   const overlay = document.createElement('canvas');
+  overlay.id = 'hud-reticle-overlay';
   overlay.style.cssText = 'position:fixed;inset:0;pointer-events:none;z-index:9;width:100%;height:100%;';
   document.body.appendChild(overlay);
 
@@ -283,6 +284,19 @@ function drawReticle(viewer) {
     </div>
   `;
   document.body.appendChild(coordPanel);
+
+  function setCrosshairVisibility(hidden) {
+    crosshairHidden = !!hidden;
+    renderCanvas();
+  }
+
+  window.addEventListener('shadowgrid:follow', () => {
+    setCrosshairVisibility(true);
+  });
+
+  window.addEventListener('shadowgrid:unfollow', () => {
+    setCrosshairVisibility(false);
+  });
 
   wireLocationSearch(viewer);
 
@@ -431,25 +445,25 @@ function drawReticle(viewer) {
     ctx.beginPath(); ctx.moveTo(margin + arm + 12, margin); ctx.lineTo(w - margin - arm - 12, margin); ctx.stroke();
     ctx.beginPath(); ctx.moveTo(margin + arm + 12, h - margin); ctx.lineTo(w - margin - arm - 12, h - margin); ctx.stroke();
 
-    // ── Centre reticle ───────────────────────────────────────────────────────
-    const r = 22, gap = 5;
-    ctx.strokeStyle = 'rgba(0,255,136,0.6)';
-    ctx.lineWidth = 1;
-    [[cx-r-gap,cy,cx-gap,cy],[cx+gap,cy,cx+r+gap,cy],
-     [cx,cy-r-gap,cx,cy-gap],[cx,cy+gap,cx,cy+r+gap]].forEach(([x1,y1,x2,y2]) => {
-      ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.stroke();
-    });
-    ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke();
-    // tick marks on ring
-    [0, Math.PI/2, Math.PI, 3*Math.PI/2].forEach(a => {
-      ctx.beginPath();
-      ctx.moveTo(cx + (r - 6) * Math.cos(a), cy + (r - 6) * Math.sin(a));
-      ctx.lineTo(cx + (r + 4) * Math.cos(a), cy + (r + 4) * Math.sin(a));
-      ctx.stroke();
-    });
-    // small dot at exact centre
-    ctx.fillStyle = 'rgba(255, 72, 0, 0.8)';
-    ctx.beginPath(); ctx.arc(cx, cy, 2, 0, Math.PI * 2); ctx.fill();
+    if (!crosshairHidden) {
+      // ── Centre reticle ─────────────────────────────────────────────────────
+      const r = 22, gap = 5;
+      ctx.strokeStyle = 'rgba(0,255,136,0.6)';
+      ctx.lineWidth = 1;
+      [[cx-r-gap,cy,cx-gap,cy],[cx+gap,cy,cx+r+gap,cy],
+       [cx,cy-r-gap,cx,cy-gap],[cx,cy+gap,cx,cy+r+gap]].forEach(([x1,y1,x2,y2]) => {
+        ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.stroke();
+      });
+      ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke();
+      [0, Math.PI/2, Math.PI, 3*Math.PI/2].forEach(a => {
+        ctx.beginPath();
+        ctx.moveTo(cx + (r - 6) * Math.cos(a), cy + (r - 6) * Math.sin(a));
+        ctx.lineTo(cx + (r + 4) * Math.cos(a), cy + (r + 4) * Math.sin(a));
+        ctx.stroke();
+      });
+      ctx.fillStyle = 'rgba(255, 72, 0, 0.8)';
+      ctx.beginPath(); ctx.arc(cx, cy, 2, 0, Math.PI * 2); ctx.fill();
+    }
   }
 
   // ── Camera position updater ───────────────────────────────────────────────
@@ -690,22 +704,43 @@ function initEntityPicker(viewer) {
 
   // ── Click handler ──────────────────────────────────────────────────────────
   handler.setInputAction(async (click) => {
-    const picked = viewer.scene.pick(click.position);
-    if (!Cesium.defined(picked) || !picked.id) { 
+    const pickedEntities = collectPickedEntities(viewer, click.position);
+    if (!pickedEntities.length) {
       // Remove glow from previously selected flight
       if (currentSelectedFlightId) {
         setFlightGlow(currentSelectedFlightId, false);
         currentSelectedFlightId = null;
       }
-      panel.style.display = 'none'; 
-      return; 
+      panel.style.display = 'none';
+      return;
     }
 
-    const entity = picked.id;
+    const primaryEntity = pickedEntities[0];
+    const primaryType = getEntityType(primaryEntity);
+    const satelliteEntities = primaryType === 'satellite'
+      ? pickedEntities.filter(entity => getEntityType(entity) === 'satellite')
+      : [];
+
+    if (satelliteEntities.length) {
+      // Remove glow from previously selected flight when selecting satellite
+      if (currentSelectedFlightId) {
+        setFlightGlow(currentSelectedFlightId, false);
+        currentSelectedFlightId = null;
+      }
+
+      const satellites = satelliteEntities.map(getSatellitePanelData);
+      panel.style.display = 'block';
+      panel.innerHTML = satelliteListHtml(satellites);
+      wireSatelliteButtons(panel, viewer, satellites);
+      wirePanelClose(panel);
+      return;
+    }
+
+    const entity = primaryEntity;
     const props  = entity.properties;
     if (!props) return;
 
-    const type = props.type?.getValue();
+    const type = primaryType;
 
     if (type === 'flight') {
       const icao     = (props.icao?.getValue() ?? String(entity.id).replace('flight-','')).toUpperCase();
@@ -746,23 +781,83 @@ function initEntityPicker(viewer) {
       renderPanel(panel, { icao, callsign, altFt, kts, heading, squawk, vert, provider, dbFlags, classification, ...info }, viewer, entity);
 
     } else if (type === 'satellite') {
-      // Remove glow from previously selected flight when selecting satellite
-      if (currentSelectedFlightId) {
-        setFlightGlow(currentSelectedFlightId, false);
-        currentSelectedFlightId = null;
-      }
-      const name         = props.name?.getValue() ?? entity.id;
-      const provider     = (props.provider?.getValue() ?? 'celestrak').toUpperCase();
-      const isMilitary   = props.isMilitary?.getValue() ?? false;
-      const orbitType    = props.orbitType?.getValue() ?? 'Unknown';
-      const application  = props.application?.getValue() ?? 'Unknown';
-      const crewedStatus = props.crewedStatus?.getValue() ?? 'Unknown';
+      const { name, provider, isMilitary, orbitType, application, crewedStatus } = getSatellitePanelData(entity);
       panel.style.display = 'block';
       panel.innerHTML = satelliteHtml({ name, provider, isMilitary, orbitType, application, crewedStatus });
       wireFollowButton(panel, viewer, entity, name, 'satellite');
       wirePanelClose(panel);
+
+    } else if (type === 'zone') {
+      if (currentSelectedFlightId) {
+        setFlightGlow(currentSelectedFlightId, false);
+        currentSelectedFlightId = null;
+      }
+
+      const domain = (props.domain?.getValue() ?? 'flight').toLowerCase();
+      const name = props.name?.getValue() ?? 'Unnamed Region';
+      const zoneType = props.zoneType?.getValue() ?? null;
+      const outageType = props.outageType?.getValue() ?? null;
+      const severity = props.severity?.getValue() ?? 'unknown';
+      const source = props.source?.getValue() ?? 'Unspecified source';
+      const status = props.status?.getValue() ?? 'unknown';
+      const activeWindowUtc = props.activeWindowUtc?.getValue() ?? 'Unknown window';
+      const summary = props.summary?.getValue() ?? '';
+      const asnScope = props.asnScope?.getValue() ?? null;
+
+      panel.style.display = 'block';
+      panel.innerHTML = zoneHtml({
+        domain,
+        name,
+        zoneType,
+        outageType,
+        severity,
+        source,
+        status,
+        activeWindowUtc,
+        summary,
+        asnScope,
+      });
+      wirePanelClose(panel);
     }
   }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
+}
+
+function collectPickedEntities(viewer, position) {
+  const drillResults = viewer.scene.drillPick(position, 16) ?? [];
+  const entities = [];
+  const seen = new Set();
+
+  for (const result of drillResults) {
+    const entity = result?.id;
+    if (!entity) continue;
+    const key = String(entity.id ?? entity.name ?? entities.length);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    entities.push(entity);
+  }
+
+  if (entities.length) return entities;
+
+  const picked = viewer.scene.pick(position);
+  if (!Cesium.defined(picked) || !picked.id) return [];
+  return [picked.id];
+}
+
+function getEntityType(entity) {
+  return entity?.properties?.type?.getValue?.() ?? null;
+}
+
+function getSatellitePanelData(entity) {
+  const props = entity?.properties;
+  return {
+    entity,
+    name: props?.name?.getValue() ?? entity?.id ?? 'Unknown Satellite',
+    provider: (props?.provider?.getValue() ?? 'celestrak').toUpperCase(),
+    isMilitary: props?.isMilitary?.getValue() ?? false,
+    orbitType: props?.orbitType?.getValue() ?? 'Unknown',
+    application: props?.application?.getValue() ?? 'Unknown',
+    crewedStatus: props?.crewedStatus?.getValue() ?? 'Unknown',
+  };
 }
 
 // ── Enrichment fetcher ────────────────────────────────────────────────────────
@@ -1010,6 +1105,37 @@ function wireFollowButton(panel, viewer, entity, label, type) {
   });
 }
 
+function wireSatelliteButtons(panel, viewer, satellites) {
+  const buttons = panel.querySelectorAll('[data-satellite-index]');
+  buttons.forEach((btn) => {
+    const index = Number.parseInt(btn.dataset.satelliteIndex ?? '', 10);
+    const sat = satellites[index];
+    if (!sat) return;
+
+    const alreadyFollowing = isFollowing() && followingLabel() === sat.name;
+    setFollowBtnState(btn, alreadyFollowing);
+
+    btn.addEventListener('click', () => {
+      if (isFollowing() && followingLabel() === sat.name) {
+        stopFollow(false, true);
+        setFollowBtnState(btn, false);
+        return;
+      }
+
+      followEntity(viewer, sat.entity, {
+        label: sat.name,
+        type: 'satellite',
+        onStop: () => {
+          const nextBtn = panel.querySelector(`[data-satellite-index="${index}"]`);
+          if (nextBtn) setFollowBtnState(nextBtn, false);
+        },
+      });
+
+      buttons.forEach(otherBtn => setFollowBtnState(otherBtn, otherBtn === btn));
+    });
+  });
+}
+
 function setFollowBtnState(btn, active) {
   if (active) {
     btn.textContent    = '⊙ UNFOLLOW';
@@ -1048,6 +1174,136 @@ function satelliteHtml({ name, provider, isMilitary, orbitType, application, cre
         border:1px solid #00aaff44;background:transparent;color:#00aaffbb;
         transition:all 0.15s ease;
       ">◎ FOLLOW</button>
+    </div>
+  `;
+}
+
+function satelliteListHtml(satellites) {
+  const countLabel = satellites.length === 1 ? '1 OBJECT' : `${satellites.length} OBJECTS`;
+  const entries = satellites.map((sat, index) => {
+    const militaryBadge = sat.isMilitary ? '<span style="color:#ff3b30;font-weight:bold">[MILITARY]</span> ' : '';
+    return `
+      <div style="padding:12px 16px;${index ? 'border-top:1px solid rgba(0,170,255,0.12);' : ''}">
+        <div style="font-size:13px;font-weight:bold;letter-spacing:0.08em;color:#eafcff">${militaryBadge}${sat.name}</div>
+        <div style="opacity:0.62;margin-top:6px;line-height:1.7">
+          Orbit: <span style="opacity:0.92">${sat.orbitType}</span><br>
+          Application: <span style="opacity:0.92">${sat.application}</span><br>
+          Crewed: <span style="opacity:0.92">${sat.crewedStatus}</span><br>
+          <span style="opacity:0.5;font-size:9px">TLE · ${sat.provider}</span>
+        </div>
+        <button
+          data-satellite-index="${index}"
+          style="
+            width:100%;padding:6px 0;margin-top:10px;border-radius:3px;cursor:pointer;
+            font-family:'Share Tech Mono',monospace;font-size:11px;letter-spacing:0.1em;
+            border:1px solid #00aaff44;background:transparent;color:#00aaffbb;
+            transition:all 0.15s ease;
+          "
+        >◎ FOLLOW</button>
+      </div>
+    `;
+  }).join('');
+
+  return `
+    <div style="background:rgba(0,170,255,0.1);padding:12px 16px;border-bottom:1px solid rgba(0,170,255,0.2)">
+      <div style="display:flex;align-items:center;gap:10px">
+        <span style="font-size:18px">◈</span>
+        <div>
+          <div style="font-size:14px;font-weight:bold;letter-spacing:0.1em;color:#00aaff">${countLabel}</div>
+          <div style="opacity:0.5;font-size:9px;margin-top:2px">OVERLAPPING SATELLITES AT THIS PICK</div>
+        </div>
+        <div style="margin-left:auto;cursor:pointer;opacity:0.5" id="panel-close">✕</div>
+      </div>
+    </div>
+    <div style="max-height:440px;overflow:auto">
+      ${entries}
+    </div>
+  `;
+}
+
+function zoneHtml({
+  domain,
+  name,
+  zoneType,
+  outageType,
+  severity,
+  source,
+  status,
+  activeWindowUtc,
+  summary,
+  asnScope,
+}) {
+  const isInternet = domain === 'internet';
+  const zoneTypeNorm = String(zoneType ?? '').toLowerCase();
+  const sourceNorm = String(source ?? '').toLowerCase();
+  const isGps = zoneTypeNorm.includes('gps') || zoneTypeNorm.includes('gnss');
+  const isSafeAirspace = !isInternet && !isGps && (sourceNorm.includes('safe airspace') || zoneTypeNorm === 'safeairspace');
+  const isFaaTfr = !isInternet && !isGps && !isSafeAirspace;
+  const safeAirspaceAccent = String(severity ?? '').toLowerCase() === 'high'
+    ? '#ea283c'
+    : (String(severity ?? '').toLowerCase() === 'medium' ? '#ff8b00' : '#ffce00');
+  const accent = isInternet
+    ? '#00b9ff'
+    : (isGps ? '#ffd54a' : (isSafeAirspace ? safeAirspaceAccent : '#ff6b57'));
+  const icon = isInternet
+    ? '⌁'
+    : (isGps ? '⌖' : (isSafeAirspace ? '▲' : '⛔'));
+  const title = isInternet
+    ? 'INTERNET OUTAGE'
+    : (isGps ? 'GPS INTERFERENCE' : (isSafeAirspace ? 'SAFE AIRSPACE RISK' : 'FAA NO FLY ZONE'));
+  const typedValue = isInternet
+    ? (outageType ?? 'unknown').replaceAll('-', ' ')
+    : (isGps
+      ? 'GPS INTERFERENCE'
+      : (isSafeAirspace
+        ? (String(severity ?? '').toLowerCase() === 'high'
+          ? 'RISK LEVEL ONE - DO NOT FLY'
+          : (String(severity ?? '').toLowerCase() === 'medium'
+            ? 'RISK LEVEL TWO - DANGER EXISTS'
+            : 'RISK LEVEL THREE - CAUTION'))
+        : 'RESTRICTED AIRSPACE'));
+  const badgeLabel = isSafeAirspace
+    ? (String(severity ?? '').toLowerCase() === 'high'
+      ? 'LEVEL 1'
+      : (String(severity ?? '').toLowerCase() === 'medium' ? 'LEVEL 2' : 'LEVEL 3'))
+    : String(severity).toUpperCase();
+  const statusLabel = isSafeAirspace ? String(status ?? 'active') : String(status).toUpperCase();
+  const summaryText = String(summary ?? '');
+  const cleanedSummary = isGps
+    ? summaryText
+      .replace(/\b\d+\s+suspect aircraft out of\s+\d+\s+observed aircraft in this H3 cell\.?/gi, '')
+      .replace(/\s{2,}/g, ' ')
+      .trim()
+    : summaryText;
+
+  return `
+    <div style="background:rgba(0,0,0,0.3);padding:12px 16px;border-bottom:1px solid ${accent}44;border-left:3px solid ${accent}">
+      <div style="display:flex;align-items:center;gap:10px">
+        <span style="font-size:18px;color:${accent}">${icon}</span>
+        <div>
+          <div style="font-size:13px;font-weight:bold;letter-spacing:0.08em;color:#fff">${name}</div>
+          <div style="opacity:0.6;font-size:9px;margin-top:1px">${title}</div>
+        </div>
+        <div style="margin-left:auto;display:flex;align-items:center;gap:8px">
+          <span style="font-size:9px;font-weight:bold;color:${accent};border:1px solid ${accent}55;padding:2px 6px;border-radius:3px;letter-spacing:0.1em">${badgeLabel}</span>
+          <span style="cursor:pointer;opacity:0.5;font-size:14px" id="panel-close">✕</span>
+        </div>
+      </div>
+    </div>
+    <div style="padding:10px 16px">
+      <table style="width:100%;border-collapse:collapse;font-size:11px">
+        <tr><td style="opacity:0.5;padding-right:12px;white-space:nowrap">Type</td><td style="font-weight:500">${typedValue}</td></tr>
+        <tr><td style="opacity:0.5;padding-right:12px;white-space:nowrap">Status</td><td style="font-weight:500">${statusLabel}</td></tr>
+        <tr><td style="opacity:0.5;padding-right:12px;white-space:nowrap">Window (UTC)</td><td style="font-weight:500">${activeWindowUtc}</td></tr>
+        ${asnScope ? `<tr><td style="opacity:0.5;padding-right:12px;white-space:nowrap">ASN Scope</td><td style="font-weight:500">${asnScope}</td></tr>` : ''}
+      </table>
+
+      <div style="margin:10px 0;border-top:1px solid rgba(0,255,136,0.1)"></div>
+
+      <div style="font-size:10px;line-height:1.7;opacity:0.88">
+        ${cleanedSummary ? `<div style="margin-bottom:7px">${cleanedSummary}</div>` : ''}
+        <div style="opacity:0.58">Source: ${source}</div>
+      </div>
     </div>
   `;
 }

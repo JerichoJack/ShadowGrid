@@ -1,7 +1,8 @@
 /**
- * layers/traffic.js
- * Phase 5 — OpenStreetMap road network + vehicle particle system.
- * Fetches major roads from Overpass API and animates vehicles as particles flowing along streets.
+ * File: src/layers/traffic.js
+ * Purpose: Traffic layer combining road network extraction and animated vehicle particles.
+ * Notes: Uses provider auto-selection (Overpass/Google/server snapshot) and adaptive profiles.
+ * Last updated: 2026-03-13
  */
 
 import * as Cesium from 'cesium';

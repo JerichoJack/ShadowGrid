@@ -39,6 +39,48 @@
       inset: 0;
       width: 100%;
       height: 100%;
+      overflow: hidden;
+      isolation: isolate;
+      background: #000;
+    }
+
+    #cesium-container canvas,
+    #cesium-container img,
+    #cesium-container video {
+      transition: filter 0.22s ease, opacity 0.22s ease, mix-blend-mode 0.22s ease;
+    }
+
+    body.mode-nvg #cesium-container {
+      background: #3f7e22;
+    }
+    body.mode-nvg #cesium-container canvas,
+    body.mode-nvg #cesium-container img,
+    body.mode-nvg #cesium-container video {
+      filter: invert(100%) saturate(0%) contrast(1.28) brightness(0.78) blur(0.15px);
+      mix-blend-mode: overlay;
+      opacity: 0.985;
+    }
+
+    body.mode-flir #cesium-container {
+      background: #000;
+    }
+    body.mode-flir #cesium-container canvas,
+    body.mode-flir #cesium-container img,
+    body.mode-flir #cesium-container video {
+      filter: grayscale(100%) saturate(0%) contrast(2.35) brightness(0.96) blur(0.55px);
+      mix-blend-mode: normal;
+      opacity: 1;
+    }
+
+    body.mode-crt #cesium-container {
+      background: #08110b;
+    }
+    body.mode-crt #cesium-container canvas,
+    body.mode-crt #cesium-container img,
+    body.mode-crt #cesium-container video {
+      filter: grayscale(30%) sepia(14%) saturate(85%) contrast(1.14) brightness(0.92);
+      mix-blend-mode: screen;
+      opacity: 0.96;
     }
 
     /* Hide Cesium on-screen credit bar to keep HUD clean. */
@@ -188,7 +230,6 @@
     }
     .shader-btn[data-mode="flir"].active    { background: #ff6600; border-color: #ff6600; color: #000; }
     .shader-btn[data-mode="crt"].active     { background: #ffaa00; border-color: #ffaa00; color: #000; }
-    .shader-btn[data-mode="anime"].active   { background: #cc44ff; border-color: #cc44ff; color: #000; }
 
     /* ── Loading Screen ─────────────────────────── */
     #loading {
@@ -231,27 +272,170 @@
       position: fixed; inset: 0;
       pointer-events: none; z-index: 5;
       background: repeating-linear-gradient(
-        to bottom,
-        transparent 0px,
-        transparent 2px,
-        rgba(0,0,0,0.08) 2px,
-        rgba(0,0,0,0.08) 4px
+        180deg,
+        rgba(0, 0, 0, 0.0) 0,
+        rgba(0, 0, 0, 0.30) 50%,
+        rgba(0, 0, 0, 0.0) 100%
       );
+      background-size: auto 4px;
+      background-attachment: fixed;
+      opacity: 0;
+      transition: opacity 0.3s;
+      mix-blend-mode: overlay;
+    }
+    #scanlines::before {
+      content: '';
+      pointer-events: none;
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      background-image: linear-gradient(
+        0deg,
+        transparent 0%,
+        rgba(32, 128, 32, 0.20) 2%,
+        rgba(32, 128, 32, 0.80) 3%,
+        rgba(32, 128, 32, 0.20) 3%,
+        transparent 100%
+      );
+      background-repeat: no-repeat;
+      background-attachment: fixed;
+      animation: crt-scan 7.5s linear infinite;
       opacity: 0;
       transition: opacity 0.3s;
     }
-    body.mode-crt #scanlines { opacity: 1; }
+    body.mode-crt #scanlines { opacity: 0.55; }
+    body.mode-crt #scanlines::before { opacity: 0.75; }
+
+    #crt-noise {
+      position: fixed; inset: 0;
+      pointer-events: none; z-index: 6;
+      opacity: 0;
+      transition: opacity 0.3s;
+      background-image: url('https://media.giphy.com/media/oEI9uBYSzLpBK/giphy.gif');
+      background-repeat: no-repeat;
+      background-size: cover;
+      background-attachment: fixed;
+      mix-blend-mode: lighten;
+      animation: crt-static 0.24s steps(2) infinite;
+    }
+    body.mode-crt #crt-noise { opacity: 0.028; }
+
+    #flir-overlay {
+      position: fixed; inset: 0;
+      pointer-events: none; z-index: 4;
+      opacity: 0;
+      transition: opacity 0.25s;
+      background:
+        radial-gradient(ellipse at center, rgba(255,255,255,0.0) 12%, rgba(0,0,0,0.18) 54%, rgba(0,0,0,0.82) 100%),
+        repeating-linear-gradient(to bottom, rgba(255,255,255,0) 0px, rgba(255,255,255,0) 2px, rgba(0,0,0,0.08) 2px, rgba(0,0,0,0.08) 4px);
+      mix-blend-mode: multiply;
+    }
+    body.mode-flir #flir-overlay { opacity: 1; }
+    #flir-overlay::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      background:
+        repeating-linear-gradient(to bottom, rgba(255,255,255,0.0) 0px, rgba(255,255,255,0.0) 1px, rgba(255,255,255,0.03) 1px, rgba(255,255,255,0.03) 2px),
+        linear-gradient(180deg, rgba(255,255,255,0.0) 0%, rgba(255,255,255,0.08) 48%, rgba(255,255,255,0.0) 100%);
+      background-size: auto auto, 100% 140px;
+      background-repeat: repeat, no-repeat;
+      opacity: 0;
+      animation: flir-roll 6.5s linear infinite;
+      transition: opacity 0.25s;
+    }
+    body.mode-flir #flir-overlay::before { opacity: 0.55; }
+    #flir-overlay::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      background-image:
+        radial-gradient(circle at 15% 25%, rgba(255,255,255,0.08) 0 1px, transparent 2px),
+        radial-gradient(circle at 75% 40%, rgba(255,255,255,0.06) 0 1px, transparent 2px),
+        radial-gradient(circle at 45% 75%, rgba(255,255,255,0.05) 0 1px, transparent 2px);
+      background-size: 3px 3px, 5px 5px, 4px 4px;
+      mix-blend-mode: screen;
+      opacity: 0;
+      transition: opacity 0.25s;
+      animation: flir-static 0.16s steps(2) infinite;
+    }
+    body.mode-flir #flir-overlay::after { opacity: 0.14; }
+
+    @keyframes crt-static {
+      0%   { transform: translate(0, 0); }
+      25%  { transform: translate(-1px, 1px); }
+      50%  { transform: translate(1px, -1px); }
+      75%  { transform: translate(1px, 1px); }
+      100% { transform: translate(0, 0); }
+    }
+
+    @keyframes nvg-static {
+      0%   { transform: translate(0, 0); }
+      25%  { transform: translate(0.5px, -0.5px); }
+      50%  { transform: translate(-0.5px, 0.5px); }
+      75%  { transform: translate(0.5px, 0.5px); }
+      100% { transform: translate(0, 0); }
+    }
+
+    @keyframes flir-static {
+      0%   { transform: translate(0, 0); }
+      50%  { transform: translate(1px, 0); }
+      100% { transform: translate(0, 0); }
+    }
+
+    @keyframes flir-roll {
+      0% { background-position: 0 0, 0 -140px; }
+      100% { background-position: 0 0, 0 calc(100% + 140px); }
+    }
+
+    @keyframes crt-scan {
+      0% { background-position: 0 -100vh; }
+      35%, 100% { background-position: 0 100vh; }
+    }
 
     /* ── NVG tint overlay ───────────────────────── */
     #nvg-overlay {
       position: fixed; inset: 0;
       pointer-events: none; z-index: 4;
-      background: radial-gradient(ellipse at center, rgba(0,60,10,0) 40%, rgba(0,0,0,0.6) 100%);
+      background:
+        radial-gradient(circle at center, rgba(166,255,120,0.18) 0%, rgba(112,205,66,0.14) 29%, rgba(0,0,0,0.0) 34%),
+        radial-gradient(circle at center, rgba(0,0,0,0.0) 42%, rgba(0,0,0,0.84) 73%, rgba(0,0,0,0.98) 100%);
       opacity: 0;
       transition: opacity 0.3s;
-      mix-blend-mode: multiply;
+      mix-blend-mode: normal;
     }
     body.mode-nvg #nvg-overlay { opacity: 1; }
+    #nvg-overlay::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      background:
+        radial-gradient(circle at center, transparent 0 41%, rgba(28, 70, 10, 0.42) 43%, rgba(0,0,0,0.0) 45%),
+        radial-gradient(circle at center, rgba(0,0,0,0.0) 0 46%, rgba(0,0,0,0.92) 66%, rgba(0,0,0,1.0) 100%);
+      opacity: 0;
+      transition: opacity 0.3s;
+    }
+    body.mode-nvg #nvg-overlay::before { opacity: 1; }
+    #nvg-overlay::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      background-image:
+        radial-gradient(circle at 39% 34%, rgba(220,255,210,0.16) 0 1px, transparent 2px),
+        radial-gradient(circle at 62% 60%, rgba(220,255,210,0.12) 0 1px, transparent 2px),
+        radial-gradient(circle at 54% 45%, rgba(220,255,210,0.10) 0 1px, transparent 2px),
+        repeating-linear-gradient(to bottom, rgba(255,255,255,0.0) 0px, rgba(255,255,255,0.0) 2px, rgba(0,0,0,0.035) 2px, rgba(0,0,0,0.035) 3px);
+      mix-blend-mode: screen;
+      opacity: 0;
+      transition: opacity 0.3s;
+      animation: nvg-static 0.22s steps(2) infinite;
+    }
+    body.mode-nvg #nvg-overlay::after { opacity: 0.18; }
 
     /* ── Pulse animation ────────────────────────── */
     @keyframes pulse {
@@ -275,6 +459,8 @@
 
   <!-- Visual overlays -->
   <div id="scanlines"></div>
+  <div id="crt-noise"></div>
+  <div id="flir-overlay"></div>
   <div id="nvg-overlay"></div>
 
   <!-- HUD — dynamic elements injected by HUD.js -->
@@ -325,6 +511,9 @@
       <button class="layer-btn inactive" data-layer="cctv">
         <span class="dot"></span> CCTV Feeds
       </button>
+      <button class="layer-btn inactive" data-layer="internet">
+        <span class="dot"></span> Internet
+      </button>
     </div>
 
     <!-- Shader modes -->
@@ -333,7 +522,6 @@
       <button class="shader-btn" data-mode="nvg">NVG</button>
       <button class="shader-btn" data-mode="flir">FLIR</button>
       <button class="shader-btn" data-mode="crt">CRT</button>
-      <button class="shader-btn" data-mode="anime">Anime</button>
     </div>
 
   </div>

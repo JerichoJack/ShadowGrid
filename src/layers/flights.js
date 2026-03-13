@@ -1,7 +1,8 @@
 /**
- * layers/flights.js
- * Live aircraft rendering with tar1090-style altitude-colored silhouette icons
- * and enriched click-to-inspect data.
+ * File: src/layers/flights.js
+ * Purpose: Live aircraft rendering, selection enrichment, and server-heavy snapshot integration.
+ * Notes: Supports multiple providers with proxy-backed auth/data routing.
+ * Last updated: 2026-03-13
  */
 
 import * as Cesium from 'cesium';
@@ -12,12 +13,15 @@ const SERVER_HEAVY_MODE = (import.meta.env.VITE_SERVER_HEAVY_MODE ?? 'false').to
 const ACTIVE_PROVIDER = SERVER_HEAVY_MODE ? 'proxy' : PROVIDER;
 const POLL_MS  = 10_000;
 const PROXY_URL = '/api/localproxy/api/flights';
+const NOFLY_GPS_URL = '/api/localproxy/api/nofly_gps';
+const NOFLY_GPS_POLL_MS = 5 * 60_000;
+const NOFLY_GPS_DEFAULT_MAX_HEIGHT_M = 18_000;
 const ADSBOOL_BASE_URL = '/api/adsbool';
 const AIRPLANESLIVE_BASE_URL = '/api/airplaneslive';
 
 const OPENSKY_CLIENT_ID     = import.meta.env.VITE_OPENSKY_CLIENT_ID     ?? '';
 const OPENSKY_CLIENT_SECRET = import.meta.env.VITE_OPENSKY_CLIENT_SECRET ?? '';
-// ⚠️  Must go through Vite proxy — auth.opensky-network.org blocks direct browser
+// Must go through Vite proxy; auth.opensky-network.org blocks direct browser
 //     fetches with no CORS headers. The /api/opensky-auth proxy rewrites the host.
 const OPENSKY_TOKEN_URL = '/api/opensky-auth/auth/realms/opensky-network/protocol/openid-connect/token';
 
@@ -754,6 +758,11 @@ let hideAllFlatIcons = false;
 let flightFeedHealthy = true;
 let hasPublishedFlightOk = false;
 let lastFlightStatusKey = '';
+let flightZonesDataSource = null;
+let noflyGpsPollTimer = null;
+let noflyGpsPayloadCache = null;
+
+const FLIGHT_ZONE_AGE_RULES = { fadeMs: 6 * 60 * 60 * 1000, expireMs: 48 * 60 * 60 * 1000 };
 
 // Aircraft classification filter state — all enabled by default
 const aircraftClassificationFilters = {
@@ -825,6 +834,216 @@ function applyFlatIconVisibility() {
   }
 }
 
+function flattenPoints(points) {
+  const out = [];
+  for (const [lon, lat] of points) out.push(lon, lat);
+  return out;
+}
+
+function flattenClosedPoints(points) {
+  if (!points.length) return [];
+  return flattenPoints([...points, points[0]]);
+}
+
+function normalizeZonePoints(points) {
+  if (!Array.isArray(points)) return [];
+  const filtered = points
+    .map(([lon, lat]) => [Number(lon), Number(lat)])
+    .filter(([lon, lat]) => Number.isFinite(lon) && Number.isFinite(lat));
+  if (filtered.length > 1) {
+    const [firstLon, firstLat] = filtered[0];
+    const [lastLon, lastLat] = filtered[filtered.length - 1];
+    if (firstLon === lastLon && firstLat === lastLat) filtered.pop();
+  }
+  return filtered;
+}
+
+function parseZoneTime(value) {
+  const ts = Date.parse(value ?? '');
+  return Number.isFinite(ts) ? ts : null;
+}
+
+function computeFlightZoneOpacity(zone, nowMs) {
+  const startsAt = parseZoneTime(zone.startsAt);
+  const endsAt = parseZoneTime(zone.endsAt);
+  const observedAt = parseZoneTime(zone.updatedAt) ?? parseZoneTime(zone.observedAt) ?? startsAt;
+
+  if (startsAt && startsAt > nowMs) return 0;
+  if (endsAt && nowMs <= endsAt) return 1;
+  if (!observedAt) return 1;
+
+  const ageMs = Math.max(0, nowMs - observedAt);
+  if (ageMs <= FLIGHT_ZONE_AGE_RULES.fadeMs) return 1;
+  if (ageMs >= FLIGHT_ZONE_AGE_RULES.expireMs) return 0;
+  return 1 - ((ageMs - FLIGHT_ZONE_AGE_RULES.fadeMs) / (FLIGHT_ZONE_AGE_RULES.expireMs - FLIGHT_ZONE_AGE_RULES.fadeMs));
+}
+
+function buildZoneWindowLabel(zone) {
+  const startsAt = zone.startsAt ? new Date(zone.startsAt).toISOString() : null;
+  const endsAt = zone.endsAt ? new Date(zone.endsAt).toISOString() : null;
+  const updatedAt = zone.updatedAt ? new Date(zone.updatedAt).toISOString() : null;
+  if (startsAt && endsAt) return `${startsAt} to ${endsAt}`;
+  if (updatedAt) return `Updated ${updatedAt}`;
+  return 'Unknown window';
+}
+
+function reserveFlightZoneId(baseId, usedIds) {
+  const seed = String(baseId ?? 'zone');
+  const base = `zone-${seed}`;
+  if (!usedIds.has(base)) {
+    usedIds.add(base);
+    return base;
+  }
+  let counter = 2;
+  while (usedIds.has(`${base}-${counter}`)) counter += 1;
+  const unique = `${base}-${counter}`;
+  usedIds.add(unique);
+  return unique;
+}
+
+function addFlightRestrictionZone(zone, nowMs, maxHeight, usedIds) {
+  const points = normalizeZonePoints(zone.points);
+  const opacity = computeFlightZoneOpacity(zone, nowMs);
+  if (points.length < 3 || opacity <= 0 || !flightZonesDataSource) return;
+
+  const source = String(zone.source ?? '').toLowerCase();
+  const isSafeAirspace = source.includes('safe airspace') || String(zone.zoneType ?? '').toLowerCase() === 'safeairspace';
+  const severity = String(zone.severity ?? '').toLowerCase();
+  const isHigh = severity === 'high';
+  const displaySeverity = isHigh ? 'restricted airspace' : (zone.severity ?? 'medium');
+  const ffaEvenColor = Cesium.Color.fromCssColorString(isHigh ? '#ff3b30' : '#ff7f73').withAlpha(0.34 * opacity);
+  const ffaOddColor = Cesium.Color.fromCssColorString('#ffd4cd').withAlpha(0.08 * opacity);
+  const faaOutline = Cesium.Color.fromCssColorString(isHigh ? '#ff655c' : '#ff9f96').withAlpha(0.92 * opacity);
+  const safeAirspaceCss = severity === 'high'
+    ? '#ea283c'
+    : (severity === 'medium' ? '#ff8b00' : '#ffce00');
+  const safeAirspaceFill = Cesium.Color.fromCssColorString(safeAirspaceCss).withAlpha((severity === 'high' ? 0.24 : 0.2) * opacity);
+  const safeAirspaceOutline = Cesium.Color.fromCssColorString(safeAirspaceCss).withAlpha(0.95 * opacity);
+  const material = isSafeAirspace
+    ? safeAirspaceFill
+    : new Cesium.StripeMaterialProperty({
+      evenColor: ffaEvenColor,
+      oddColor: ffaOddColor,
+      repeat: 18,
+      offset: 0.2,
+      orientation: Cesium.StripeOrientation.VERTICAL,
+    });
+  const outline = isSafeAirspace ? safeAirspaceOutline : faaOutline;
+  const zoneSeverity = isSafeAirspace ? (zone.severity ?? 'low') : displaySeverity;
+
+  flightZonesDataSource.entities.add({
+    id: reserveFlightZoneId(zone.id, usedIds),
+    polygon: {
+      hierarchy: Cesium.Cartesian3.fromDegreesArray(flattenPoints(points)),
+      height: 0,
+      extrudedHeight: maxHeight,
+      material,
+      outline: false,
+    },
+    polyline: {
+      positions: Cesium.Cartesian3.fromDegreesArray(flattenClosedPoints(points)),
+      width: isSafeAirspace ? 3 : 2,
+      clampToGround: true,
+      material: outline,
+    },
+    properties: {
+      type: 'zone',
+      domain: 'flight',
+      id: zone.id,
+      name: zone.name,
+      zoneType: zone.zoneType ?? 'tfr',
+      severity: zoneSeverity,
+      source: zone.source ?? 'FAA',
+      status: zone.status ?? 'active',
+      activeWindowUtc: buildZoneWindowLabel(zone),
+      summary: zone.summary ?? '',
+    },
+  });
+}
+
+function addGpsInterferenceZone(zone, nowMs, maxHeight, usedIds) {
+  const points = normalizeZonePoints(zone.points);
+  const opacity = computeFlightZoneOpacity(zone, nowMs);
+  if (points.length < 3 || opacity <= 0 || !flightZonesDataSource) return;
+
+  const fill = Cesium.Color.fromCssColorString(zone.severity === 'high' ? '#ff3b30' : '#ffd54a').withAlpha((zone.severity === 'high' ? 0.22 : 0.18) * opacity);
+  const outline = Cesium.Color.fromCssColorString(zone.severity === 'high' ? '#ff746c' : '#ffe17c').withAlpha(0.92 * opacity);
+
+  flightZonesDataSource.entities.add({
+    id: reserveFlightZoneId(zone.id, usedIds),
+    polygon: {
+      hierarchy: Cesium.Cartesian3.fromDegreesArray(flattenPoints(points)),
+      height: Number(zone.floorMeters ?? 0),
+      extrudedHeight: Number(zone.ceilingMeters ?? maxHeight),
+      material: fill,
+      outline: false,
+    },
+    polyline: {
+      positions: Cesium.Cartesian3.fromDegreesArray(flattenClosedPoints(points)),
+      width: 2,
+      clampToGround: true,
+      material: outline,
+    },
+    properties: {
+      type: 'zone',
+      domain: 'flight',
+      id: zone.id,
+      name: zone.name,
+      zoneType: zone.zoneType ?? 'gps',
+      severity: zone.severity ?? 'medium',
+      source: zone.source ?? 'GPSJam',
+      status: zone.status ?? 'active',
+      activeWindowUtc: buildZoneWindowLabel(zone),
+      summary: zone.summary ?? '',
+    },
+  });
+}
+
+function syncFlightZoneVisibility() {
+  if (flightZonesDataSource) flightZonesDataSource.show = enabled;
+}
+
+function renderFlightZones(payload) {
+  noflyGpsPayloadCache = payload;
+  if (!flightZonesDataSource) return;
+
+  const nowMs = Date.now();
+  const maxHeight = Number(payload?.maxFlightHeightMeters ?? NOFLY_GPS_DEFAULT_MAX_HEIGHT_M);
+  const usedIds = new Set();
+  flightZonesDataSource.entities.removeAll();
+
+  for (const zone of payload?.flightRestrictions ?? []) {
+    addFlightRestrictionZone(zone, nowMs, maxHeight, usedIds);
+  }
+  for (const zone of payload?.gpsInterference ?? []) {
+    addGpsInterferenceZone(zone, nowMs, maxHeight, usedIds);
+  }
+
+  syncFlightZoneVisibility();
+}
+
+function noflyGpsUrlForViewer(viewer) {
+  if (!viewer) return NOFLY_GPS_URL;
+  const bounds = getViewportBounds(viewer);
+  if (!bounds) return NOFLY_GPS_URL;
+  const boundsStr = [bounds.minLon, bounds.minLat, bounds.maxLon, bounds.maxLat]
+    .map(v => Number(v).toFixed(4))
+    .join(',');
+  return `${NOFLY_GPS_URL}?bounds=${encodeURIComponent(boundsStr)}`;
+}
+
+async function refreshFlightZones(viewer) {
+  try {
+    const response = await fetch(noflyGpsUrlForViewer(viewer));
+    if (!response.ok) throw new Error(`nofly_gps ${response.status}`);
+    const payload = await response.json();
+    renderFlightZones(payload);
+  } catch (error) {
+    console.warn('[Flights] No-fly/GPS refresh failed:', error);
+    if (noflyGpsPayloadCache) renderFlightZones(noflyGpsPayloadCache);
+  }
+}
+
 // ── Public API ────────────────────────────────────────────────────────────────
 
 export async function initFlights(viewer) {
@@ -842,6 +1061,17 @@ export async function initFlights(viewer) {
       resolve();
     });
   });
+
+  flightZonesDataSource = new Cesium.CustomDataSource('nofly-gps-zones');
+  await viewer.dataSources.add(flightZonesDataSource);
+  syncFlightZoneVisibility();
+  await refreshFlightZones(viewer);
+  if (noflyGpsPollTimer) {
+    window.clearInterval(noflyGpsPollTimer);
+  }
+  noflyGpsPollTimer = window.setInterval(() => {
+    if (enabled) refreshFlightZones(viewer);
+  }, NOFLY_GPS_POLL_MS);
 
   if (SERVER_HEAVY_MODE) {
     subscribeServerSnapshot('flights', {
@@ -874,6 +1104,8 @@ export async function initFlights(viewer) {
       setEnabled(val) {
         enabled = val;
         setServerSnapshotLayerEnabled('flights', enabled);
+        syncFlightZoneVisibility();
+        if (enabled) refreshFlightZones(viewer);
         entityMap.forEach((e, icaoHex) => {
           const state = trackStateMap.get(icaoHex);
           const aircraftType = state?.aircraftType ?? 'generic';
@@ -929,6 +1161,8 @@ export async function initFlights(viewer) {
   return {
     setEnabled(val) {
       enabled = val;
+      syncFlightZoneVisibility();
+      if (enabled) refreshFlightZones(viewer);
       entityMap.forEach((e, icaoHex) => {
         const state = trackStateMap.get(icaoHex);
         const aircraftType = state?.aircraftType ?? 'generic';

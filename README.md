@@ -17,6 +17,7 @@ All of it running in a browser tab. No classified clearances required.
 - **Tactical HUD** — corner brackets, UTC clock, live entity counter, coordinate readout, place search, and layer/shader controls
 - **Street-Level Traffic** — live Google traffic-aware flow (Routes API) with automatic OpenStreetMap particle fallback, terrain-aligned to roads
 - **CCTV Integration** — tile-streamed global public camera markers with live snapshot/video inspection panels
+- **Airspace + Connectivity Overlays** — FAA TFR polygons, GPSJam interference zones, and IODA internet blackout polygons with click-to-inspect metadata
 - **4D Timeline / Replay** — scrub through archived snapshots of all data layers *(Phase 7 — stub, not yet implemented)*
 
 ---
@@ -34,6 +35,8 @@ All of it running in a browser tab. No classified clearances required.
 | Satellite Orbital Math | [satellite.js](https://github.com/shashwatak/satellite-js) (SGP4 propagation) |
 | Satellite TLE Data | CelesTrak / Space-Track / N2YO *(switchable)* |
 | Street Traffic Data | Google Routes API traffic-aware polylines / OpenStreetMap Overpass API *(auto fallback)* |
+| Airspace + Outage Overlays | FAA TFR WFS + GPSJam + IODA + SafeAirspace map links |
+| Geospatial Overlay Utilities | `h3-js` + `topojson-client` |
 | CCTV Playback | [hls.js](https://github.com/video-dev/hls.js/) for browser HLS playback |
 | CCTV Data Pipeline | `server/collectors/collectCameras.mjs` + tiled camera manifests in `public/camera-data` |
 | IP Geolocation | ipapi.co (free, no key) |
@@ -91,6 +94,25 @@ Set `VITE_TRAFFIC_PROVIDER` in your `.env` to switch.
 | `auto` | Google Routes API or OSM | Mixed | ✅ If Google path used | **Recommended default**; uses Google live traffic when `VITE_GOOGLE_MAPS_API_KEY` is present, otherwise falls back to OSM simulation |
 | `google` | Google Routes API (`TRAFFIC_ON_POLYLINE`) | Paid usage tier | ✅ Yes | Real-time traffic speed intervals (`NORMAL` / `SLOW` / `TRAFFIC_JAM`) along sampled city routes |
 | `osm` | OpenStreetMap Overpass road geometry | Free | ❌ No | Simulated vehicle flow with local-time density profile + terrain-aligned particles |
+
+---
+
+## ⚙️ Advanced Runtime Flags
+
+Optional env vars you can add to `.env` for tuning behavior:
+
+- `VITE_SERVER_HEAVY_MODE` — force browser layers to request server-built snapshots (`true`/`false`)
+- `VITE_DEFAULT_LON`, `VITE_DEFAULT_LAT`, `VITE_DEFAULT_ALT` — fallback startup camera position
+- `VITE_DEFAULT_USE_IP_LOCATION` — use IP geolocation on boot (`true` by default)
+- `VITE_DEVELOPER_MODE` or `VITE_DEV_MODE` — enables extra diagnostics widgets in HUD (most useful with heavy mode)
+- `VITE_TRAFFIC_MAX_PARTICLES` — caps client-side OSM particle count
+- `VITE_SATELLITE_MAX_OBJECTS`, `VITE_SATELLITE_MAX_PER_CATEGORY` — cap client satellite render counts
+- `VITE_SERVER_CAMERA_MAX_OBJECTS` — cap client camera snapshot objects in heavy mode
+
+Proxy/server-side tuning knobs:
+
+- `SHADOWGRID_SERVER_HEAVY` / `SHADOWGRID_SERVER_MODE` — enables server heavy mode behavior in `server/proxy.mjs`
+- `SHADOWGRID_CAMERA_MAX_POINTS` — caps server camera points returned per snapshot
 
 ---
 
@@ -218,11 +240,19 @@ npm run dev -- --host
 
 Open [http://localhost:5173](http://localhost:5173) or your local network IP (e.g. `http://192.168.1.100:5173`) to view on network devices.
 
+Available scripts:
+
+- `npm run dev` — launcher script (`scripts/dev.mjs`)
+- `npm run dev:vite` — Vite only (no proxy)
+- `npm run proxy` — proxy server only
+- `npm run build` — production build
+- `npm run preview` — preview production build
+
 ---
 
 ### Running the Proxy
 
-If `VITE_FLIGHT_PROVIDER=proxy`, the app fetches flight data through a local Node.js proxy server. 
+If `VITE_FLIGHT_PROVIDER=proxy`, the app fetches flight data through a local Node.js proxy server.
 
 The proxy runs on port `3001` and handles viewport-aware hub fetching from `opendata.adsb.fi`, with per-hub caching (12s TTL) and a stale aircraft cleanup (2 min). It is not required if you use the `airplaneslive`, `adsbool`, or `opensky` providers directly.
 
@@ -241,6 +271,8 @@ Run with:
 ```bash
 npm run dev -- --host --server
 ```
+
+This launcher automatically sets `VITE_SERVER_HEAVY_MODE=true` for the client and enables heavy behavior in the proxy process.
 
 In this mode the proxy now serves cached snapshots for:
 
@@ -261,29 +293,31 @@ The cache is persisted to `server/cache/world-snapshot-cache.json` so warm data 
 ```
 ShadowGrid/
 ├── server/
-│   ├── proxy.mjs             # Node.js flight data proxy (viewport-aware hub fetching)
+│   ├── proxy.mjs              # Node.js data proxy + snapshot hub
 │   └── collectors/
 │       └── collectCameras.mjs # Pulls/normalizes public camera feeds + builds camera tiles/manifest
 ├── src/
-│   ├── main.js               # Boot sequence — wires globe, layers, and UI
+│   ├── main.js                # Boot sequence — wires globe, layers, and UI
 │   ├── core/
-│   │   ├── globe.js          # CesiumJS viewer + map provider switcher
-│   │   └── camera.js         # IP geolocation startup + fly-to navigation
+│   │   ├── globe.js           # CesiumJS viewer + map provider switcher
+│   │   ├── camera.js          # IP geolocation startup + fly-to navigation
+│   │   └── serverSnapshot.js  # Heavy-mode world snapshot polling + client-side snapshot apply
 │   ├── layers/
-│   │   ├── flights.js        # Flight provider switcher + aircraft silhouette rendering
-│   │   ├── satellites.js     # Satellite provider switcher + SGP4 orbital propagation
-│   │   ├── traffic.js        # Google live traffic flow + OSM fallback particle system (Phase 5)
-│   │   └── cctv.js           # Global tiled CCTV markers + live snapshot/video inspect panel
+│   │   ├── flights.js         # Flight provider switcher + aircraft silhouette rendering
+│   │   ├── satellites.js      # Satellite provider switcher + SGP4 orbital propagation
+│   │   ├── traffic.js         # Google live traffic flow + OSM fallback particle system
+│   │   ├── cctv.js            # Global tiled CCTV markers + live snapshot/video inspect panel
+│   │   └── intrenet.js        # Internet blackout polygons from IODA-backed server snapshots
 │   ├── ui/
-│   │   ├── HUD.js            # Coordinate readout + click-to-inspect panel
-│   │   ├── Controls.js       # Layer toggles + shader mode buttons + GLSL shaders
-│   │   └── clock.js          # UTC clock
+│   │   ├── HUD.js             # Coordinate readout + click-to-inspect panel
+│   │   ├── Controls.js        # Layer toggles + shader mode buttons + GLSL shaders
+│   │   └── clock.js           # UTC clock
 │   └── archive/
-│       └── collector.js      # Node.js cron: polls APIs, writes snapshots (Phase 7 — stub)
+│       └── collector.js       # Node.js cron: polls APIs, writes snapshots (Phase 7 — stub)
 ├── public/
-│   ├── camera-data/          # Tiled CCTV datasets + manifest (served as static assets)
+│   ├── camera-data/           # Tiled CCTV datasets + manifest (served as static assets)
 │   └── favicon.svg
-├── index.html                # App shell + HUD markup + CSS (self-contained)
+├── index.html                 # App shell + HUD markup + CSS (self-contained)
 ├── .env.example
 ├── vite.config.js
 └── README.md
@@ -299,12 +333,13 @@ ShadowGrid/
 - ✅ Phase 2 — Aircraft silhouette rendering (7 distinct shapes by type code + ADS-B category)
 - ✅ Phase 2 — Military/commercial/other classification with color coding
 - ✅ Phase 3 — Satellite orbital tracking with SGP4 propagation + click-to-inspect
-- ⬜ Phase 4 — Visual shaders (NVG, FLIR, CRT, Anime) via WebGL PostProcessStage + CSS overlays
-- ✅ Phase 5 — Street traffic system (Google live traffic + OSM fallback)
-- ✅ Phase 6 — CCTV tiled camera layer + live snapshot/video inspection panel
-- ⬜ Phase 7 — airspace/TFR polygons, GPS jamming, internet outage markers
-- ⬜ Phase 8 — Replace ad hoc live caching with a proper spatial store.
-- ⬜ Phase 9 — 4D timeline + data archival / replay
+- ✅ Phase 4 — Street traffic system (Google live traffic + OSM fallback)
+- ✅ Phase 5 — CCTV tiled camera layer + live snapshot/video inspection panel
+- ✅ Phase 6 — FAA TFR polygons, GPSJam medium/high interference hexagons, and IODA blackout polygons tied to Flight/Internet layers with click-to-inspect detail panels.
+- ⬜ Phase 7 — Historical storage + replay backend (replace transient snapshot cache with durable spatial/time-indexed storage)
+- ⬜ Phase 8 — 4D timeline + data archival / replay with archived snapshots and a real time slider
+- ⬜ Phase 9 — Visual shaders (Normal, NVG, FLIR, CRT, Anime) via WebGL PostProcessStage + CSS overlays
+- ⬜ Phase 10 — Performance optimizations, mobile support, and UI polish
 
 ---
 

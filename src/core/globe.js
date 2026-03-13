@@ -1,12 +1,8 @@
 /**
- * core/globe.js
- * Initialises the CesiumJS viewer and mounts a 3D tile provider.
- *
- * Controlled by VITE_MAP_PROVIDER in your .env:
- *
- *   cesium    — Cesium ion World Terrain + OSM Buildings (free, no credit card)
- *   google    — Google Maps Photorealistic 3D Tiles (best visuals, needs billing)
- *   maptiler  — MapTiler terrain + satellite imagery (free tier, no credit card)
+ * File: src/core/globe.js
+ * Purpose: Creates the Cesium viewer and wires the configured globe/tiles provider.
+ * Providers: Cesium ion, Google Photorealistic 3D Tiles, or MapTiler.
+ * Last updated: 2026-03-13
  */
 
 import * as Cesium from 'cesium';

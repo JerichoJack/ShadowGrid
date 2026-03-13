@@ -1,3 +1,10 @@
+/**
+ * File: src/core/serverSnapshot.js
+ * Purpose: Client-side manager for server-heavy world snapshot polling and fanout.
+ * Notes: Publishes diagnostics, throttles refresh, and updates active layer state.
+ * Last updated: 2026-03-13
+ */
+
 import * as Cesium from 'cesium';
 
 const SERVER_HEAVY_MODE = (import.meta.env.VITE_SERVER_HEAVY_MODE ?? 'false').toLowerCase() === 'true';

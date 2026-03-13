@@ -1,6 +1,7 @@
 /**
- * ShadowGrid — main entry point
- * Boots the globe, then lazily initialises each layer.
+ * File: src/main.js
+ * Purpose: Application bootstrap sequence for globe, layers, controls, and HUD.
+ * Last updated: 2026-03-13
  */
 
 import { initGlobe } from './core/globe.js';
@@ -9,6 +10,7 @@ import { initFlights } from './layers/flights.js';
 import { initSatellites } from './layers/satellites.js';
 import { initTraffic } from './layers/traffic.js';
 import { initCCTV } from './layers/cctv.js';
+import { initInternet } from './layers/intrenet.js';
 import { initControls } from './ui/Controls.js';
 import { initHUD, updateHUDCounts } from './ui/HUD.js';
 import { initCitySearch } from './ui/citySearch.js';
@@ -25,6 +27,7 @@ async function boot() {
     { label: 'Propagating satellite orbits…', pct: 65 },
     { label: 'Initializing street traffic…',  pct: 75 },
     { label: 'Initializing CCTV layer…',      pct: 85 },
+    { label: 'Loading GPS, Flight Restrictions, and Internet overlays…',     pct: 90 },
     { label: 'Mounting HUD…',                 pct: 92 },
     { label: 'System nominal.',               pct: 100 },
   ];
@@ -66,14 +69,20 @@ async function boot() {
   const cctv = await initCCTV(viewer);
   cctv?.setEnabled(false);  // Start with CCTV hidden
 
-  // Step 7 – UI
+  // Step 7 – Internet blackout overlays
   setProgress(steps[6].pct, steps[6].label);
-  initControls(viewer, { flights, satellites, traffic, cctv });
+  const internet = await initInternet(viewer);
+  internet?.setEnabled(false); // Internet layer starts hidden
+
+  // Step 8 – UI
+  setProgress(steps[7].pct, steps[7].label);
+  initControls(viewer, { flights, satellites, traffic, cctv, internet });
+
   initHUD(viewer);
   initCitySearch(viewer);
 
-  // Step 8 – Done — hide loading screen
-  setProgress(steps[7].pct, steps[7].label);
+  // Step 9 – Done — hide loading screen
+  setProgress(steps[8].pct, steps[8].label);
   await new Promise(r => setTimeout(r, 600));
   document.getElementById('loading').classList.add('hidden');
 

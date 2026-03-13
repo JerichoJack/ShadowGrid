@@ -1,3 +1,9 @@
+/**
+ * File: vite.config.js
+ * Purpose: Vite configuration for ShadowGrid with Cesium static asset wiring.
+ * Last updated: 2026-03-13
+ */
+
 import { defineConfig } from 'vite';
 import { viteStaticCopy } from 'vite-plugin-static-copy';
 

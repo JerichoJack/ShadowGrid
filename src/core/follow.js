@@ -1,17 +1,8 @@
 /**
- * core/follow.js
- * Entity-follow camera using Cesium's native trackedEntity + viewFrom.
- *
- * viewer.trackedEntity keeps the entity centred while still allowing the user
- * to orbit (right-drag), zoom (scroll), and pitch freely around it.
- * The only way to exit follow mode is via the UNFOLLOW button — not by
- * orbiting or zooming, which are natural interactions while following.
- *
- * Usage:
- *   followEntity(viewer, entity, { label, type, onStop })
- *   stopFollow()
- *   isFollowing()    → bool
- *   followingLabel() → string | null
+ * File: src/core/follow.js
+ * Purpose: Manages entity-follow camera behavior using trackedEntity + viewFrom.
+ * Notes: Follow mode persists through orbit/zoom and exits only when explicitly stopped.
+ * Last updated: 2026-03-13
  */
 
 import * as Cesium from 'cesium';
@@ -21,7 +12,7 @@ import * as Cesium from 'cesium';
 // viewFrom: camera offset (ENU metres) from entity when follow starts.
 // x = east offset, y = north offset (negative = behind), z = up offset.
 const VIEW_FROM = {
-  flight:    new Cesium.Cartesian3(0, -2_000,    900),  // closer behind & above
+  flight:    new Cesium.Cartesian3(0,   -150,    260),  // closer & above
   satellite: new Cesium.Cartesian3(0,      0, 600_000), // straight above
   vehicle:   new Cesium.Cartesian3(0, -1_000,    600),
   camera:    new Cesium.Cartesian3(0,      0,    300),
@@ -78,13 +69,10 @@ export function followEntity(viewer, entity, opts = {}) {
   // Fly smoothly to the entity first, then hand off to trackedEntity
   const initPos = _getEntityPosition(entity);
   if (initPos) {
+    const initialDestination = _worldOffsetFromEntity(initPos, offset);
     viewer.camera.flyTo({
-      destination: Cesium.Cartesian3.add(
-        initPos,
-        new Cesium.Cartesian3(0, 0, Cesium.Cartesian3.magnitude(offset) * 0.4),
-        new Cesium.Cartesian3()
-      ),
-      duration: 1.6,
+      destination: initialDestination ?? initPos,
+      duration: 1.2,
       easingFunction: Cesium.EasingFunction.QUADRATIC_IN_OUT,
       complete: () => {
         if (_active && _entity === entity) {
@@ -172,6 +160,12 @@ function _getEntityPosition(entity) {
   catch { return null; }
 }
 
+function _worldOffsetFromEntity(position, localOffset) {
+  if (!position || !localOffset) return null;
+  const enuFrame = Cesium.Transforms.eastNorthUpToFixedFrame(position);
+  return Cesium.Matrix4.multiplyByPoint(enuFrame, localOffset, new Cesium.Cartesian3());
+}
+
 function _captureCameraView(viewer) {
   if (!viewer?.camera) return null;
   return {
@@ -186,10 +180,12 @@ function _captureControlMappings(viewer) {
   const ctrl = viewer?.scene?.screenSpaceCameraController;
   if (!ctrl) return null;
   return {
+    enableZoom: ctrl.enableZoom,
     rotateEventTypes: _cloneEventTypes(ctrl.rotateEventTypes),
     tiltEventTypes: _cloneEventTypes(ctrl.tiltEventTypes),
     lookEventTypes: _cloneEventTypes(ctrl.lookEventTypes),
     translateEventTypes: _cloneEventTypes(ctrl.translateEventTypes),
+    zoomEventTypes: _cloneEventTypes(ctrl.zoomEventTypes),
   };
 }
 
@@ -211,15 +207,19 @@ function _applyFollowControlMappings(viewer) {
   ctrl.translateEventTypes = [
     Cesium.CameraEventType.MIDDLE_DRAG,
   ];
+  ctrl.zoomEventTypes = [];
+  ctrl.enableZoom = false;
 }
 
 function _restoreControlMappings(viewer, saved) {
   const ctrl = viewer?.scene?.screenSpaceCameraController;
   if (!ctrl || !saved) return;
+  ctrl.enableZoom = saved.enableZoom;
   ctrl.rotateEventTypes = _cloneEventTypes(saved.rotateEventTypes);
   ctrl.tiltEventTypes = _cloneEventTypes(saved.tiltEventTypes);
   ctrl.lookEventTypes = _cloneEventTypes(saved.lookEventTypes);
   ctrl.translateEventTypes = _cloneEventTypes(saved.translateEventTypes);
+  ctrl.zoomEventTypes = _cloneEventTypes(saved.zoomEventTypes);
 }
 
 function _cloneEventTypes(v) {

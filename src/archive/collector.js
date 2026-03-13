@@ -1,10 +1,8 @@
 /**
- * archive/collector.js
- * Phase 7 — Node.js cron job that polls all live APIs and stores
- * timestamped snapshots for the 4D timeline replay feature.
- *
- * Run with:  node src/archive/collector.js
- * Or via:    npm run archive
+ * File: src/archive/collector.js
+ * Purpose: Legacy Node utility that periodically snapshots flight data to disk.
+ * Usage: Run via `node src/archive/collector.js` or `npm run archive`.
+ * Last updated: 2026-03-13
  */
 
 import fs   from 'fs';
