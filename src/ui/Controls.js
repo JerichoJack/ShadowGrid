@@ -42,6 +42,7 @@ export function initControls(viewer, layers) {
         const filterContainer = btn.nextElementSibling;
         if (filterContainer?.classList.contains('filter-container')) {
           const isCollapsed = filterContainer.classList.toggle('collapsed');
+          btn.classList.toggle('collapsed', isCollapsed);
           filterCollapsedState.set(layerName, isCollapsed);
         }
         return;
@@ -96,10 +97,16 @@ export function initControls(viewer, layers) {
       if (filterContainer?.classList.contains('filter-container')) {
         filterContainer.classList.toggle('visible', isActive);
         btn.classList.toggle('has-filters', isActive);
-        // Keep the collapsed state if it was set previously
-        if (!filterCollapsedState.has(layerName)) {
-          filterCollapsedState.set(layerName, true); // Start collapsed by default
-          filterContainer.classList.add('collapsed');
+        if (isActive) {
+          // Auto-expand options for expandable active layers.
+          filterContainer.classList.remove('collapsed');
+          btn.classList.remove('collapsed');
+          filterCollapsedState.set(layerName, false);
+        } else {
+          // Keep collapsed state remembered while hidden.
+          const isCollapsed = filterCollapsedState.get(layerName) ?? false;
+          filterContainer.classList.toggle('collapsed', isCollapsed);
+          btn.classList.toggle('collapsed', isCollapsed);
         }
       }
     });

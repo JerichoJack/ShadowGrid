@@ -432,7 +432,7 @@ function drawReticle(viewer) {
       border: 1px solid rgba(0,255,136,0.28);
       color: rgba(0,255,136,0.8);
       font-family: 'Share Tech Mono', 'Courier New', monospace;
-      font-size: 8px;
+      font-size: 10px;
       letter-spacing: 0.1em;
       text-transform: uppercase;
       padding: 3px 9px;
@@ -487,7 +487,7 @@ function drawReticle(viewer) {
       border: 1px solid rgba(0,255,136,0.28);
       color: rgba(0,255,136,0.8);
       font-family: 'Share Tech Mono', 'Courier New', monospace;
-      font-size: 8px;
+      font-size: 10px;
       letter-spacing: 0.1em;
       text-transform: uppercase;
       padding: 3px 9px;
@@ -510,10 +510,10 @@ function drawReticle(viewer) {
       padding: 6px;
       backdrop-filter: blur(8px);
     ">
-      <button class="shader-option-btn active" data-mode="normal" style="background:rgba(0,0,0,0.48);border:1px solid rgba(0,255,136,0.2);color:rgba(0,255,136,0.85);font-family:'Share Tech Mono', 'Courier New', monospace;font-size:8px;letter-spacing:0.09em;text-transform:uppercase;padding:4px 8px;cursor:pointer;text-align:left;">Normal</button>
-      <button class="shader-option-btn" data-mode="nvg" style="background:rgba(0,0,0,0.48);border:1px solid rgba(0,255,136,0.2);color:rgba(0,255,136,0.65);font-family:'Share Tech Mono', 'Courier New', monospace;font-size:8px;letter-spacing:0.09em;text-transform:uppercase;padding:4px 8px;cursor:pointer;text-align:left;">NVG</button>
-      <button class="shader-option-btn" data-mode="flir" style="background:rgba(0,0,0,0.48);border:1px solid rgba(0,255,136,0.2);color:rgba(0,255,136,0.65);font-family:'Share Tech Mono', 'Courier New', monospace;font-size:8px;letter-spacing:0.09em;text-transform:uppercase;padding:4px 8px;cursor:pointer;text-align:left;">FLIR</button>
-      <button class="shader-option-btn" data-mode="crt" style="background:rgba(0,0,0,0.48);border:1px solid rgba(0,255,136,0.2);color:rgba(0,255,136,0.65);font-family:'Share Tech Mono', 'Courier New', monospace;font-size:8px;letter-spacing:0.09em;text-transform:uppercase;padding:4px 8px;cursor:pointer;text-align:left;">CRT</button>
+      <button class="shader-option-btn active" data-mode="normal" style="background:rgba(0,0,0,0.48);border:1px solid rgba(0,255,136,0.2);color:rgba(0,255,136,0.85);font-family:'Share Tech Mono', 'Courier New', monospace;font-size:10px;letter-spacing:0.09em;text-transform:uppercase;padding:5px 8px;cursor:pointer;text-align:left;">Normal</button>
+      <button class="shader-option-btn" data-mode="nvg" style="background:rgba(0,0,0,0.48);border:1px solid rgba(0,255,136,0.2);color:rgba(0,255,136,0.65);font-family:'Share Tech Mono', 'Courier New', monospace;font-size:10px;letter-spacing:0.09em;text-transform:uppercase;padding:5px 8px;cursor:pointer;text-align:left;">NVG</button>
+      <button class="shader-option-btn" data-mode="flir" style="background:rgba(0,0,0,0.48);border:1px solid rgba(0,255,136,0.2);color:rgba(0,255,136,0.65);font-family:'Share Tech Mono', 'Courier New', monospace;font-size:10px;letter-spacing:0.09em;text-transform:uppercase;padding:5px 8px;cursor:pointer;text-align:left;">FLIR</button>
+      <button class="shader-option-btn" data-mode="crt" style="background:rgba(0,0,0,0.48);border:1px solid rgba(0,255,136,0.2);color:rgba(0,255,136,0.65);font-family:'Share Tech Mono', 'Courier New', monospace;font-size:10px;letter-spacing:0.09em;text-transform:uppercase;padding:5px 8px;cursor:pointer;text-align:left;">CRT</button>
     </div>
   `;
   document.body.appendChild(filtersDock);
