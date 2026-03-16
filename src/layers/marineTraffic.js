@@ -1,15 +1,17 @@
 /**
  * File: src/layers/marineTraffic.js
  * Purpose: Marine traffic layer rendering vessel positions and tracking.
- * Notes: Uses OpenStreetMap Overpass API for vessel data and real-time AIS data source.
+ * Notes: Uses local proxy snapshots for cached marine vessel data in both normal and server-heavy modes.
  * Last updated: 2026-03-16
  */
 
 import * as Cesium from 'cesium';
+import { setServerSnapshotLayerEnabled, subscribeServerSnapshot } from '../core/serverSnapshot.js';
 
-const OVERPASS_API = 'https://overpass-api.de/api/interpreter';
-const AIS_DATA_API = 'https://api.n2yo.com/rest/v1/satellite/positions'; // Alternative marine data source
-const VESSEL_REFRESH_MINUTES = 5;
+const SERVER_HEAVY_MODE = (import.meta.env.VITE_SERVER_HEAVY_MODE ?? 'false').toLowerCase() === 'true';
+const MARINE_SNAPSHOT_URL = '/api/localproxy/api/marine/snapshot';
+const VESSEL_REFRESH_MS = 60_000;
+const TRACK_MAX_POINTS = 12;
 const VESSEL_COLOR_CARGO = new Cesium.Color(0.2, 0.6, 1.0, 0.8); // Blue for cargo
 const VESSEL_COLOR_TANKER = new Cesium.Color(0.8, 0.4, 0.2, 0.8); // Orange for tanker
 const VESSEL_COLOR_PASSENGER = new Cesium.Color(0.0, 1.0, 0.6, 0.8); // Green for passenger
@@ -18,8 +20,7 @@ const VESSEL_COLOR_OTHER = new Cesium.Color(0.6, 0.6, 0.8, 0.8); // Light purple
 
 let enabled = false;
 let viewer = null;
-let vesselEntities = new Map();
-let vesselData = [];
+let vesselEntities = new Map(); // id -> { point: Entity, track: Entity, trail: Array<{lat:number, lon:number}> }
 let updateTimer = null;
 
 /**
@@ -27,7 +28,7 @@ let updateTimer = null;
  */
 function classifyVesselType(vessel) {
   const name = (vessel.name || vessel.tags?.name || '').toLowerCase();
-  const shiptype = vessel.tags?.ship || '';
+  const shiptype = String(vessel.type || vessel.tags?.ship || vessel.tags?.['ship:type'] || '').toLowerCase();
 
   if (shiptype.includes('tanker') || name.includes('tanker')) return 'tanker';
   if (shiptype.includes('cargo') || name.includes('cargo')) return 'cargo';
@@ -50,143 +51,113 @@ function getVesselColor(vesselType) {
 }
 
 /**
- * Fetch vessel positions from Overpass QL (OpenStreetMap ships)
+ * Compute current viewport bounds for proxy requests.
  */
-async function fetchVesselsFromOverpass(bbox) {
-  try {
-    const query = `
-      [bbox:${bbox.south},${bbox.west},${bbox.north},${bbox.east}];
-      (
-        node["seamark:type"="buoy"];
-        node["seamark:type"="light_vessel"];
-        way["seamark:type"="wreck"];
-        way["natural"="water"];
-      );
-      out center;
-    `;
+function getViewportBounds() {
+  if (!viewer) return null;
 
-    const response = await fetch(OVERPASS_API, {
-      method: 'POST',
-      body: `data=${encodeURIComponent(query)}`,
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    });
+  const rectangle = viewer.camera.computeViewRectangle(viewer.scene.globe.ellipsoid);
+  if (!rectangle) return null;
+
+  return {
+    west: Cesium.Math.toDegrees(rectangle.west),
+    south: Cesium.Math.toDegrees(rectangle.south),
+    east: Cesium.Math.toDegrees(rectangle.east),
+    north: Cesium.Math.toDegrees(rectangle.north),
+  };
+}
+
+function buildMarineSnapshotUrl(bounds) {
+  if (!bounds) return MARINE_SNAPSHOT_URL;
+  const boundsStr = [bounds.west, bounds.south, bounds.east, bounds.north]
+    .map(v => Number(v).toFixed(6))
+    .join(',');
+  return `${MARINE_SNAPSHOT_URL}?bounds=${encodeURIComponent(boundsStr)}`;
+}
+
+async function fetchVesselsFromProxy() {
+  const bounds = getViewportBounds();
+  if (!bounds) return [];
+
+  try {
+    const response = await fetch(buildMarineSnapshotUrl(bounds));
 
     if (!response.ok) {
-      console.warn(`[MarineTraffic] Overpass API error: ${response.status}`);
+      console.warn(`[MarineTraffic] Proxy API error: ${response.status}`);
       return [];
     }
 
     const data = await response.json();
-    const vessels = [];
-
-    // Process nodes (buoys, light vessels)
-    if (data.elements) {
-      for (const element of data.elements) {
-        if (element.lat && element.lon && element.tags) {
-          vessels.push({
-            id: `vessel-${element.id}`,
-            lat: element.lat,
-            lon: element.lon,
-            name: element.tags.name || element.tags['seamark:type'] || 'Unknown',
-            type: element.tags['seamark:type'] || element.tags['natural'] || 'unknown',
-            tags: element.tags,
-          });
-        }
-      }
-    }
-
-    return vessels;
+    return Array.isArray(data?.vessels) ? data.vessels : [];
   } catch (err) {
-    console.warn('[MarineTraffic] Overpass fetch failed:', err.message);
+    console.warn('[MarineTraffic] Proxy fetch failed:', err.message);
     return [];
   }
 }
 
 /**
- * Simulate marine traffic for demonstration (when real data unavailable)
+ * Build/update a vessel trail list from either server-provided track or prior positions.
  */
-function generateSimulatedVessels(bbox) {
-  const vessels = [];
-  const shipTypes = ['Cargo', 'Tanker', 'Passenger', 'Fishing', 'Tugboat'];
-  const colors = ['Verde', 'Blu', 'Rosso', 'Giallo', 'Bianco'];
-
-  // Generate 30-50 random vessel positions in bbox
-  const count = Math.floor(Math.random() * 20) + 30;
-  for (let i = 0; i < count; i++) {
-    const lat = bbox.south + Math.random() * (bbox.north - bbox.south);
-    const lon = bbox.west + Math.random() * (bbox.east - bbox.west);
-    const shipType = shipTypes[Math.floor(Math.random() * shipTypes.length)];
-    const vesselName = `${colors[Math.floor(Math.random() * colors.length)]} ${shipType} ${i}`;
-
-    vessels.push({
-      id: `vessel-sim-${i}`,
-      lat,
-      lon,
-      name: vesselName,
-      type: shipType.toLowerCase(),
-      speed: Math.floor(Math.random() * 20) + 5, // 5-25 knots
-      heading: Math.floor(Math.random() * 360),
-      tags: { ship: shipType.toLowerCase() },
-    });
+function resolveTrack(vessel, existingTrail = []) {
+  if (Array.isArray(vessel.track) && vessel.track.length >= 2) {
+    return vessel.track
+      .filter(p => Number.isFinite(p?.lat) && Number.isFinite(p?.lon))
+      .slice(-TRACK_MAX_POINTS);
   }
 
-  return vessels;
+  const trail = [...existingTrail, { lat: vessel.lat, lon: vessel.lon }];
+  return trail.slice(-TRACK_MAX_POINTS);
 }
 
 /**
- * Update vessel entities on the globe
+ * Render/update vessel entities and track polylines.
  */
-async function updateVessels() {
-  if (!viewer || !enabled) return;
+function applyVesselSnapshot(vessels = []) {
+  if (!viewer) return;
 
   try {
-    // Get camera bounds to fetch relevant area
-    const camera = viewer.camera;
-    const cart = camera.positionCartographic;
-    if (!cart) return;
+    const seen = new Set();
 
-    const lat = Cesium.Math.toDegrees(cart.latitude);
-    const lon = Cesium.Math.toDegrees(cart.longitude);
-
-    // Define a reasonable search area (±4 degrees)
-    const bbox = {
-      north: Math.min(lat + 4, 85),
-      south: Math.max(lat - 4, -85),
-      east: (lon + 4 + 360) % 360,
-      west: (lon - 4 + 360) % 360,
-    };
-
-    // Fetch vessels (try Overpass, fall back to simulation)
-    let vessels = await fetchVesselsFromOverpass(bbox);
-    if (vessels.length === 0) {
-      vessels = generateSimulatedVessels(bbox);
-    }
-
-    vesselData = vessels;
-
-    // Update or create entities for each vessel
     for (const vessel of vessels) {
+      if (!Number.isFinite(vessel?.lat) || !Number.isFinite(vessel?.lon)) continue;
+      const vesselId = String(vessel.id ?? `${vessel.name ?? 'vessel'}-${vessel.lat}-${vessel.lon}`);
+      seen.add(vesselId);
+
       const vesselType = classifyVesselType(vessel);
       const color = getVesselColor(vesselType);
+      const track = resolveTrack(vessel, vesselEntities.get(vesselId)?.trail ?? []);
+      const trackPositions = track.map((p) => Cesium.Cartesian3.fromDegrees(p.lon, p.lat, 8));
 
-      if (vesselEntities.has(vessel.id)) {
-        // Update existing entity
-        const entity = vesselEntities.get(vessel.id);
-        entity.position = Cesium.Cartesian3.fromDegrees(vessel.lon, vessel.lat, 10);
+      if (vesselEntities.has(vesselId)) {
+        const record = vesselEntities.get(vesselId);
+        record.point.position = Cesium.Cartesian3.fromDegrees(vessel.lon, vessel.lat, 10);
+        record.point.label.text = vessel.name || vesselId;
+        record.point.point.color = color;
+        record.point.label.fillColor = color;
+        record.point.properties = new Cesium.PropertyBag({
+          type: vesselType,
+          shipType: vessel.type,
+          speed: vessel.speed ?? 'N/A',
+          heading: vessel.heading ?? 'N/A',
+          source: vessel.simulated ? 'simulated' : 'live',
+        });
+        record.track.polyline.positions = trackPositions;
+        record.track.polyline.material = color.withAlpha(0.35);
+        record.track.show = enabled;
+        record.trail = track;
       } else {
-        // Create new entity
-        const entity = viewer.entities.add({
-          id: vessel.id,
+        const pointEntity = viewer.entities.add({
+          id: `marine-point-${vesselId}`,
           position: Cesium.Cartesian3.fromDegrees(vessel.lon, vessel.lat, 10),
           point: {
             pixelSize: 6,
-            color: color,
+            color,
             outlineColor: Cesium.Color.WHITE,
             outlineWidth: 1,
             heightReference: Cesium.HeightReference.NONE,
           },
           label: {
-            text: vessel.name,
+            text: vessel.name || vesselId,
             font: '10px "Share Tech Mono"',
             fillColor: color,
             outlineColor: Cesium.Color.BLACK,
@@ -201,23 +172,53 @@ async function updateVessels() {
             shipType: vessel.type,
             speed: vessel.speed ?? 'N/A',
             heading: vessel.heading ?? 'N/A',
+            source: vessel.simulated ? 'simulated' : 'live',
           },
           show: enabled,
         });
 
-        vesselEntities.set(vessel.id, entity);
+        const trackEntity = viewer.entities.add({
+          id: `marine-track-${vesselId}`,
+          polyline: {
+            positions: trackPositions,
+            width: 2,
+            material: color.withAlpha(0.35),
+            clampToGround: false,
+            arcType: Cesium.ArcType.GEODESIC,
+          },
+          show: enabled,
+        });
+
+        vesselEntities.set(vesselId, {
+          point: pointEntity,
+          track: trackEntity,
+          trail: track,
+        });
       }
     }
 
-    // Remove entities that are no longer in the data
-    for (const [id, entity] of vesselEntities.entries()) {
-      if (!vessels.some(v => v.id === id)) {
-        viewer.entities.remove(entity);
+    for (const [id, record] of vesselEntities.entries()) {
+      if (!seen.has(id)) {
+        viewer.entities.remove(record.point);
+        viewer.entities.remove(record.track);
         vesselEntities.delete(id);
       }
     }
   } catch (err) {
-    console.warn('[MarineTraffic] Update failed:', err.message);
+    console.warn('[MarineTraffic] Snapshot apply failed:', err.message);
+  }
+}
+
+async function refreshMarineSnapshot() {
+  if (!viewer || !enabled || SERVER_HEAVY_MODE) return;
+  const vessels = await fetchVesselsFromProxy();
+  applyVesselSnapshot(vessels);
+}
+
+function setEntityVisibility(show) {
+  for (const record of vesselEntities.values()) {
+    record.point.show = show;
+    record.track.show = show;
   }
 }
 
@@ -227,22 +228,37 @@ async function updateVessels() {
 export async function initMarineTraffic(viewer_) {
   viewer = viewer_;
 
-  return {
-    setEnabled(en) {
-      enabled = en;
+  if (SERVER_HEAVY_MODE) {
+    subscribeServerSnapshot('marine', {
+      onData(payload) {
+        if (!enabled) return;
+        applyVesselSnapshot(payload?.marine?.vessels ?? []);
+      },
+      onError(err) {
+        if (!enabled) return;
+        console.warn('[MarineTraffic] Server snapshot failed:', err?.message ?? 'unknown');
+      },
+    });
+  }
 
-      // Show/hide all entities
-      for (const entity of vesselEntities.values()) {
-        entity.show = enabled;
-      }
+  return {
+    async setEnabled(en) {
+      enabled = en;
+      setEntityVisibility(enabled);
 
       if (enabled) {
-        // Start refresh cycle
-        updateVessels();
+        if (SERVER_HEAVY_MODE) {
+          setServerSnapshotLayerEnabled('marine', true);
+          return;
+        }
+
+        await refreshMarineSnapshot();
         if (updateTimer) clearInterval(updateTimer);
-        updateTimer = setInterval(updateVessels, VESSEL_REFRESH_MINUTES * 60_000);
+        updateTimer = setInterval(() => {
+          refreshMarineSnapshot();
+        }, VESSEL_REFRESH_MS);
       } else {
-        // Stop refresh
+        setServerSnapshotLayerEnabled('marine', false);
         if (updateTimer) clearInterval(updateTimer);
         updateTimer = null;
       }

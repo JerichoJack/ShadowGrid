@@ -75,6 +75,7 @@ const SAT_CATALOG_TTL_MS = 10 * 60_000;
 const SAT_SNAPSHOT_POLL_TIMEOUT_MS = 8000;
 const SAT_SNAPSHOT_TTL_MS = 5_000;
 const TRAFFIC_SNAPSHOT_TTL_MS = 45_000;
+const MARINE_SNAPSHOT_TTL_MS = 30_000;
 const FLIGHT_SNAPSHOT_TTL_MS = SERVER_HEAVY_MODE ? 3_000 : 1_500;
 const CAMERA_MANIFEST_TTL_MS = 10 * 60_000;
 const CAMERA_TILE_CACHE_TTL_MS = 15 * 60_000;
@@ -140,6 +141,8 @@ const N2YO_SAMPLE_POINTS = [
 const flightSnapshotCache = new Map();
 /** @type {Map<string, {ts:number, payload:any}>} */
 const trafficSnapshotCache = new Map();
+/** @type {Map<string, {ts:number, payload:any}>} */
+const marineSnapshotCache = new Map();
 
 /** @type {{ts:number, tileDeg:number, tiles:Array<{key:string,lat:number,lng:number,count:number}>}} */
 let cameraManifestCache = { ts: 0, tileDeg: 5, tiles: [] };
@@ -764,6 +767,7 @@ function scheduleCacheWrite() {
         ts: Date.now(),
         flights: [...flightSnapshotCache.entries()].slice(0, 64),
         traffic: [...trafficSnapshotCache.entries()].slice(0, 64),
+        marine: [...marineSnapshotCache.entries()].slice(0, 64),
         satellites: satSnapshotCache,
       };
       fs.writeFileSync(CACHE_FILE, JSON.stringify(out));
@@ -786,6 +790,11 @@ function loadSnapshotCacheFromDisk() {
     for (const [key, value] of data.traffic ?? []) {
       if (value?.payload && Number.isFinite(value?.ts)) {
         trafficSnapshotCache.set(key, value);
+      }
+    }
+    for (const [key, value] of data.marine ?? []) {
+      if (value?.payload && Number.isFinite(value?.ts)) {
+        marineSnapshotCache.set(key, value);
       }
     }
     if (data?.satellites?.payload && Number.isFinite(data?.satellites?.ts)) {
@@ -1628,6 +1637,178 @@ async function getTrafficPayload(bounds) {
     cacheHit: false,
   };
   trafficSnapshotCache.set(cacheKey, { ts: generatedAt, payload });
+  scheduleCacheWrite();
+  return payload;
+}
+
+function overpassMarineQuery(bounds) {
+  if (!Array.isArray(bounds) || bounds.length !== 4) return null;
+  const [minLon, minLat, maxLon, maxLat] = bounds;
+  return `
+    [out:json][timeout:20];
+    (
+      node["seamark:type"~"^(light_vessel|tanker|cargo|passenger|fishing_vessel|fishing|pilot_station|tug)$"](${minLat},${minLon},${maxLat},${maxLon});
+      way["seamark:type"~"^(light_vessel|tanker|cargo|passenger|fishing_vessel|fishing|pilot_station|tug)$"](${minLat},${minLon},${maxLat},${maxLon});
+      relation["seamark:type"~"^(light_vessel|tanker|cargo|passenger|fishing_vessel|fishing|pilot_station|tug)$"](${minLat},${minLon},${maxLat},${maxLon});
+      node["ship:type"](${minLat},${minLon},${maxLat},${maxLon});
+      way["ship:type"](${minLat},${minLon},${maxLat},${maxLon});
+      relation["ship:type"](${minLat},${minLon},${maxLat},${maxLon});
+    );
+    out center tags;
+  `;
+}
+
+function hashString(input = '') {
+  let hash = 2166136261;
+  for (let i = 0; i < input.length; i += 1) {
+    hash ^= input.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+}
+
+function mulberry32(seed) {
+  let t = seed >>> 0;
+  return function next() {
+    t += 0x6D2B79F5;
+    let n = Math.imul(t ^ (t >>> 15), t | 1);
+    n ^= n + Math.imul(n ^ (n >>> 7), n | 61);
+    return ((n ^ (n >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function normalizeLon180(lon) {
+  return ((((lon + 180) % 360) + 360) % 360) - 180;
+}
+
+function vesselTypeFromTags(tags = {}) {
+  const type = String(tags['ship:type'] ?? tags['seamark:type'] ?? tags.ship ?? '').toLowerCase();
+  if (type.includes('tanker')) return 'tanker';
+  if (type.includes('cargo')) return 'cargo';
+  if (type.includes('passenger')) return 'passenger';
+  if (type.includes('fishing')) return 'fishing';
+  return type || 'other';
+}
+
+function buildTrackPoints(lat, lon, headingDeg = 0, speedKnots = 10, steps = 6) {
+  const points = [];
+  const headingRad = (Number(headingDeg) || 0) * (Math.PI / 180);
+  const speedMps = (Number(speedKnots) || 0) * 0.514444;
+  const stepSeconds = 60;
+  for (let i = steps - 1; i >= 0; i -= 1) {
+    const distanceMeters = speedMps * stepSeconds * i;
+    const dLat = (Math.cos(headingRad) * distanceMeters) / 111320;
+    const dLon = (Math.sin(headingRad) * distanceMeters) / (111320 * Math.max(Math.cos((lat * Math.PI) / 180), 0.2));
+    points.push({ lat: lat - dLat, lon: normalizeLon180(lon - dLon) });
+  }
+  points.push({ lat, lon: normalizeLon180(lon) });
+  return points;
+}
+
+function generateSimulatedMarineVessels(bounds, cacheKey, count = 48) {
+  const [minLon, minLat, maxLon, maxLat] = bounds;
+  const lonSpan = Math.max(0.1, maxLon - minLon);
+  const latSpan = Math.max(0.1, maxLat - minLat);
+  const bucket = Math.floor(Date.now() / 60_000);
+  const phase = ((Date.now() % 60_000) / 60_000) * Math.PI * 2;
+  const rng = mulberry32(hashString(`${cacheKey}:${bucket}`));
+  const names = ['Atlas', 'Aurora', 'Mariner', 'Poseidon', 'Endeavor', 'Orion', 'Calypso', 'Navigator', 'Voyager', 'Argonaut'];
+  const types = ['cargo', 'tanker', 'passenger', 'fishing', 'other'];
+  const vessels = [];
+
+  for (let i = 0; i < count; i += 1) {
+    const type = types[Math.floor(rng() * types.length)];
+    const baseLat = minLat + rng() * latSpan;
+    const baseLon = minLon + rng() * lonSpan;
+    const heading = Math.floor(rng() * 360);
+    const speed = 6 + Math.floor(rng() * 18);
+    const driftScale = 0.03 + rng() * 0.06;
+    const lat = Math.max(-85, Math.min(85, baseLat + Math.sin(phase + i) * driftScale));
+    const lon = normalizeLon180(baseLon + Math.cos(phase + i * 0.7) * driftScale);
+
+    vessels.push({
+      id: `sim-vessel-${i}`,
+      lat,
+      lon,
+      name: `${names[i % names.length]} ${String(i + 1).padStart(2, '0')}`,
+      type,
+      speed,
+      heading,
+      simulated: true,
+      tags: { ship: type },
+      track: buildTrackPoints(lat, lon, heading, speed),
+    });
+  }
+
+  return vessels;
+}
+
+function parseOverpassVessels(payload) {
+  const out = [];
+  for (const element of payload?.elements ?? []) {
+    const lat = Number.isFinite(element?.lat) ? element.lat : element?.center?.lat;
+    const lon = Number.isFinite(element?.lon) ? element.lon : element?.center?.lon;
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
+
+    const tags = element?.tags ?? {};
+    const type = vesselTypeFromTags(tags);
+    const heading = Number.parseFloat(tags.heading ?? tags.course ?? tags['seamark:radio_station:category']);
+    const speed = Number.parseFloat(tags.speed ?? tags.knots ?? tags['seamark:notice:speed_limit']);
+
+    out.push({
+      id: `${element.type ?? 'obj'}-${element.id}`,
+      lat,
+      lon: normalizeLon180(lon),
+      name: tags.name || tags.ref || tags['seamark:name'] || `Vessel ${element.id}`,
+      type,
+      speed: Number.isFinite(speed) ? speed : null,
+      heading: Number.isFinite(heading) ? heading : null,
+      simulated: false,
+      tags,
+      track: buildTrackPoints(lat, normalizeLon180(lon), Number.isFinite(heading) ? heading : 0, Number.isFinite(speed) ? speed : 8),
+    });
+  }
+  return out;
+}
+
+async function getMarinePayload(bounds) {
+  const b = normalizeBounds(bounds);
+  if (!b) {
+    return { vessels: [], total: 0, ts: Date.now(), source: 'marine-server', mode: 'bounds-required' };
+  }
+
+  const cacheKey = boundsCacheKey(b, 'marine-global');
+  const cached = marineSnapshotCache.get(cacheKey);
+  const now = Date.now();
+  if (cached && (now - cached.ts) < MARINE_SNAPSHOT_TTL_MS) {
+    return { ...cached.payload, cacheHit: true };
+  }
+
+  let vessels = [];
+  let source = 'osm-overpass-server';
+  try {
+    const query = overpassMarineQuery(b);
+    const response = await fetchOverpassJson(query, 20_000);
+    vessels = parseOverpassVessels(response);
+  } catch (error) {
+    console.warn(`[proxy] Marine Overpass fetch failed: ${error?.message ?? 'unknown'}`);
+  }
+
+  if (!vessels.length) {
+    vessels = generateSimulatedMarineVessels(b, cacheKey);
+    source = 'simulated-server';
+  }
+
+  const generatedAt = Date.now();
+  const payload = {
+    vessels,
+    total: vessels.length,
+    ts: generatedAt,
+    source,
+    cacheKey,
+    cacheHit: false,
+  };
+  marineSnapshotCache.set(cacheKey, { ts: generatedAt, payload });
   scheduleCacheWrite();
   return payload;
 }
@@ -2614,6 +2795,21 @@ const server = http.createServer(async (req, res) => {
       res.writeHead(502);
       res.end(JSON.stringify({ error: err?.message ?? 'traffic request failed' }));
     }
+  } else if (url === '/api/marine/snapshot') {
+    const parts = (query.bounds ?? '').split(',').map(Number);
+    if (parts.length !== 4 || parts.some(n => !Number.isFinite(n))) {
+      res.writeHead(400);
+      res.end(JSON.stringify({ error: 'bounds must be minLon,minLat,maxLon,maxLat' }));
+      return;
+    }
+    try {
+      const payload = await getMarinePayload(parts);
+      res.writeHead(200);
+      res.end(JSON.stringify(payload));
+    } catch (err) {
+      res.writeHead(502);
+      res.end(JSON.stringify({ error: err?.message ?? 'marine snapshot failed' }));
+    }
   } else if (url === '/api/satellite-imagery/preview') {
     const lat = Number(query.lat);
     const lon = Number(query.lon);
@@ -2677,7 +2873,7 @@ const server = http.createServer(async (req, res) => {
   } else if (url === '/api/world/snapshot') {
     const parts = (query.bounds ?? '').split(',').map(Number);
     const bounds = (parts.length === 4 && parts.every(n => Number.isFinite(n))) ? parts : null;
-    const include = new Set((query.include ?? 'flights,satellites,traffic,cameras').split(',').map(s => s.trim().toLowerCase()).filter(Boolean));
+    const include = new Set((query.include ?? 'flights,satellites,traffic,marine,cameras').split(',').map(s => s.trim().toLowerCase()).filter(Boolean));
     const maxSat = Math.max(parseInt(query.satMax ?? '0', 10) || 0, 0) || Infinity;
     const satPerCategory = Math.max(parseInt(query.satPerCategory ?? `${SATELLITE_MAX_PER_CATEGORY}`, 10) || SATELLITE_MAX_PER_CATEGORY, 1);
     const satCategories = String(query.satCategories ?? '')
@@ -2700,20 +2896,25 @@ const server = http.createServer(async (req, res) => {
       const trafficPromise = (include.has('traffic') && bounds)
         ? getTrafficPayload(bounds)
         : null;
+      const marinePromise = (include.has('marine') && bounds)
+        ? getMarinePayload(bounds)
+        : null;
       const camerasPromise = (include.has('cameras') && bounds)
         ? getCameraSnapshot(bounds, maxCam)
         : null;
 
-      const [flightsPayload, satellitesPayload, trafficPayload, camerasPayload] = await Promise.all([
+      const [flightsPayload, satellitesPayload, trafficPayload, marinePayload, camerasPayload] = await Promise.all([
         flightsPromise,
         satellitesPromise,
         trafficPromise,
+        marinePromise,
         camerasPromise,
       ]);
 
       if (flightsPayload) payload.flights = flightsPayload;
       if (satellitesPayload) payload.satellites = satellitesPayload;
       if (trafficPayload) payload.traffic = trafficPayload;
+      if (marinePayload) payload.marine = marinePayload;
       if (camerasPayload) payload.cameras = camerasPayload;
 
       payload.diagnostics = {
@@ -2721,12 +2922,14 @@ const server = http.createServer(async (req, res) => {
           flights: payload.flights?.source ?? null,
           satellites: payload.satellites?.source ?? null,
           traffic: payload.traffic?.source ?? null,
+          marine: payload.marine?.source ?? null,
           cameras: payload.cameras?.source ?? null,
         },
         cache: {
           flights: payload.flights?.cacheHit ?? null,
           satellites: payload.satellites?.cacheHit ?? null,
           traffic: payload.traffic?.cacheHit ?? null,
+          marine: payload.marine?.cacheHit ?? null,
           cameras: payload.cameras?.cacheHit ?? null,
         },
       };
@@ -2749,6 +2952,7 @@ const server = http.createServer(async (req, res) => {
       cache: {
         flights: flightSnapshotCache.size,
         traffic: trafficSnapshotCache.size,
+        marine: marineSnapshotCache.size,
         sat_points: satSnapshotCache.points?.length ?? 0,
         camera_tiles: cameraTileCache.size,
         camera_snapshots: cameraSnapshotCache.size,
