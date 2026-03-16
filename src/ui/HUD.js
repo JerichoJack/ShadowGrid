@@ -386,8 +386,7 @@ function drawReticle(viewer) {
         <button id="hud-cam-zoom-out" style="background:rgba(0,0,0,0.5);border:1px solid rgba(0,255,136,0.25);color:rgba(0,255,136,0.78);font-family:'Share Tech Mono', monospace;font-size:9px;letter-spacing:0.06em;padding:4px 6px;cursor:pointer;">ZOOM −</button>
         <button id="hud-cam-reset-north" style="background:rgba(0,0,0,0.5);border:1px solid rgba(0,255,136,0.25);color:rgba(0,255,136,0.78);font-family:'Share Tech Mono', monospace;font-size:9px;letter-spacing:0.06em;padding:4px 6px;cursor:pointer;">NORTH</button>
         <button id="hud-cam-orbital" style="background:rgba(0,0,0,0.5);border:1px solid rgba(0,255,136,0.25);color:rgba(0,255,136,0.78);font-family:'Share Tech Mono', monospace;font-size:9px;letter-spacing:0.06em;padding:4px 6px;cursor:pointer;">LABELS</button>
-        <button id="hud-cam-imagery-dropdown" style="position:relative;background:rgba(0,0,0,0.5);border:1px solid rgba(0,255,136,0.25);color:rgba(0,255,136,0.78);font-family:'Share Tech Mono', monospace;font-size:9px;letter-spacing:0.06em;padding:4px 6px;cursor:pointer;">IMAGERY ▾</button>
-          <button id="hud-cam-rotate" style="grid-column:1 / span 2;background:rgba(0,0,0,0.5);border:1px solid rgba(0,255,136,0.25);color:rgba(0,255,136,0.78);font-family:'Share Tech Mono', monospace;font-size:9px;letter-spacing:0.06em;padding:4px 6px;cursor:pointer;">ROTATE</button>
+        <button id="hud-cam-rotate" style="grid-column:1 / span 2;background:rgba(0,0,0,0.5);border:1px solid rgba(0,255,136,0.25);color:rgba(0,255,136,0.78);font-family:'Share Tech Mono', monospace;font-size:9px;letter-spacing:0.06em;padding:4px 6px;cursor:pointer;">ROTATE</button>
       </div>
       <div id="satellite-imagery-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);backdrop-filter:blur(4px);z-index:100;pointer-events:auto;">
         <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:90%;max-width:700px;background:rgba(4,10,18,0.96);border:2px solid rgba(0,255,136,0.35);border-right:3px solid rgba(0,255,136,0.7);padding:0;backdrop-filter:blur(10px);box-shadow:0 8px 32px rgba(0,0,0,0.6);">
@@ -798,7 +797,7 @@ function wireCameraControlButtons(viewer) {
   const zoomOutBtn = document.getElementById('hud-cam-zoom-out');
   const resetNorthBtn = document.getElementById('hud-cam-reset-north');
   const orbitalBtn = document.getElementById('hud-cam-orbital');
-  const imageryDropdownBtn = document.getElementById('hud-cam-imagery-dropdown');
+  const imageryDropdownBtn = document.getElementById('hud-imagery-dropdown');
   const rotateBtn = document.getElementById('hud-cam-rotate');
   
   // Satellite imagery modal elements
