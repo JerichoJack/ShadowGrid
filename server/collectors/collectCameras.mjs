@@ -414,6 +414,95 @@ async function enrichWithSunders(cameras) {
   }
 }
 
+/** Fetch sunders-only cameras (not in trafficvision feeds) and add as new sources */
+async function fetchSundersOnlyCameras() {
+  const SUNDERS_API = 'https://sunders.uber.space/camera.php';
+  const GRID_SIZE = 10;  // Same grid as enrichment for consistency
+  let sundersOnlyCount = 0;
+
+  try {
+    console.log(`\n  Fetching sunders-only cameras (Flock Safety + OSM surveillance)...`);
+    
+    // Define regions to query (covers most populated areas)
+    const regions = [
+      { minLat: 24, maxLat: 50, minLng: -130, maxLng: -60 },  // USA
+      { minLat: 41, maxLat: 51, minLng: -10, maxLng: 40 },    // Europe
+      { minLat: 35, maxLat: 55, minLng: 100, maxLng: 150 },   // East Asia
+      { minLat: -45, maxLat: -10, minLng: 110, maxLng: 160 }, // Australia
+    ];
+    
+    const newCameras = [];
+    let totalFetched = 0;
+    
+    for (const region of regions) {
+      const params = new URLSearchParams({
+        bbox: `${region.minLng},${region.minLat},${region.maxLng},${region.maxLat}`,
+        format: 'json',
+      });
+      const sunUrl = `${SUNDERS_API}?${params}`;
+      
+      try {
+        const res = await fetch(sunUrl, {
+          signal: AbortSignal.timeout(30_000),
+          headers: { 'User-Agent': 'ShadowGrid-Collector/1.0' },
+        });
+        if (!res.ok) continue;
+        
+        const sunders = await res.json();
+        if (!Array.isArray(sunders)) continue;
+        
+        totalFetched += sunders.length;
+        
+        // Filter for surveillance cameras
+        for (const sun of sunders) {
+          const tags = sun.tags || {};
+          
+          // Include: man_made=surveillance OR manufacturer=Flock Safety
+          const isSurveillance = tags.man_made === 'surveillance';
+          const isFlockSafety = tags.manufacturer?.toLowerCase().includes('flock');
+          
+          if (isSurveillance || isFlockSafety) {
+            // Convert to our schema
+            const cam = {
+              id: `sunders-${sun.id}`,
+              source: 'sunders',
+              feedType: 'image',  // OSM nodes don't have video URLs
+              lat: parseFloat(sun.lat),
+              lng: parseFloat(sun.lon),
+              imageUrl: null,
+              videoUrl: null,
+              location: tags.name || tags.operator || 'Surveillance Camera',
+              country: '',
+              state: '',
+              city: '',
+              // Store OSM tags directly
+              sundersType: tags.camera_type || null,
+              sundersOperator: tags.operator || null,
+              sundersDirection: tags.camera_direction ? parseFloat(tags.camera_direction) : null,
+              sundersHeight: tags.height ? parseFloat(tags.height) : null,
+              sundersManufacturer: tags.manufacturer || null,
+            };
+            
+            // Only add if coordinates are valid
+            if (Number.isFinite(cam.lat) && Number.isFinite(cam.lng)) {
+              newCameras.push(cam);
+              sundersOnlyCount++;
+            }
+          }
+        }
+      } catch (err) {
+        console.warn(`    Region [${region.minLat},${region.maxLat}]×[${region.minLng},${region.maxLng}]: ${err.message}`);
+      }
+    }
+    
+    console.log(`    Fetched ${totalFetched} sunders nodes, ${sundersOnlyCount} qualify as surveillance cameras`);
+    return newCameras;
+  } catch (err) {
+    console.warn(`    Sunders-only fetch failed (optional): ${err.message}`);
+    return [];
+  }
+}
+
 /** Run an array of async tasks with max concurrency */
 async function pool(tasks, concurrency) {
   const results = [];
@@ -444,6 +533,13 @@ async function main() {
   const allCameras = results.flatMap(r => r.cameras);
   console.log(`\n  Total cameras: ${allCameras.length}`);
 
+  // ── Fetch sunders-only cameras (Flock Safety + OSM surveillance) ──────────
+  const sundersCameras = await fetchSundersOnlyCameras();
+  if (sundersCameras.length > 0) {
+    allCameras.push(...sundersCameras);
+    console.log(`  Added ${sundersCameras.length} sunders-only surveillance cameras`);
+  }
+
   // ── Deduplicate by id ─────────────────────────────────────────────────────
   const seen = new Set();
   const unique = allCameras.filter(c => {
@@ -464,7 +560,8 @@ async function main() {
   // ── Compact/lite output — only fields needed for tile rendering ────────────
   // Schema: id(i), lat(a), lon(o), imageUrl(u), videoUrl(x), feedType(t), source(s)
   // For hybrid (h): both u and x are populated. For image (i): only u. For video (v): only x.
-  // Sunders enrichment: type(y), operator(z), direction(d), height(k) — all optional.
+  // Sunders enrichment: type(y), operator(z), direction(d), height(k), manufacturer(m) — all optional.
+  // Includes trafficvision cameras enriched with OSM metadata + sunders-only surveillance cameras.
   const lite = unique.map(c => {
     const feedTypeChar = c.feedType[0];  // 'i'=image, 'v'=video, 'h'=hybrid
     const obj = {
@@ -489,10 +586,11 @@ async function main() {
     }
 
     // Sunders enrichment (will be null if not enriched yet)
-    if (c.sundersType) obj.y = c.sundersType;      // camera:type from OSM
-    if (c.sundersOperator) obj.z = c.sundersOperator;  // operator name
+    if (c.sundersType) obj.y = c.sundersType;           // camera:type from OSM
+    if (c.sundersOperator) obj.z = c.sundersOperator;   // operator name
     if (c.sundersDirection) obj.d = c.sundersDirection; // direction in degrees
     if (c.sundersHeight) obj.k = c.sundersHeight;       // height in meters
+    if (c.sundersManufacturer) obj.m = c.sundersManufacturer; // manufacturer (Flock Safety, etc.)
 
     return obj;
   });
@@ -510,8 +608,8 @@ async function main() {
     ts: new Date().toISOString(),
     n:  lite.length,
     d:  lite.map(c => [+c.a.toFixed(4), +c.o.toFixed(4), T_IDX[c.t] ?? 0]),
-    // Count enriched cameras (with sunders OSM data)
-    sunders: lite.filter(c => c.y || c.z || c.d || c.k).length,
+    // Count enriched cameras (with sunders OSM data) + sunders-only cameras
+    sunders: lite.filter(c => c.y || c.z || c.d || c.k || c.m).length,
   };
   const globePath = path.join(OUT_DIR, 'cameras-globe.json');
   fs.writeFileSync(globePath, JSON.stringify(globe));

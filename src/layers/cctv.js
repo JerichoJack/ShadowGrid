@@ -125,13 +125,15 @@ function renderPanel(cam) {
     // For new dual-URL schema: cam.u = image, cam.x = video
     // For video (v): only cam.x is set; for image (i): only cam.u is set
     // For hybrid (h): both cam.u (image) and cam.x (video) are set
+    // For sunders-only (source='sunders'): no URLs, show OSM metadata instead
     const hasVideo  = cam.t === 'v' || cam.t === 'h';
     const hasImage  = cam.t === 'i' || cam.t === 'h';
     const videoUrl  = hasVideo ? (cam.x || cam.u) : null;     // prefer cam.x for video
     const imageUrl  = hasImage ? freshUrl(cam.u || cam.x) : null;  // fallback to video if no image
+    const isSundersOnly = !videoUrl && !imageUrl;
     const kind      = videoKind(videoUrl);
-    const typeLabel = cam.t === 'v' ? 'LIVE VIDEO' : cam.t === 'h' ? 'HYBRID' : 'SNAPSHOT';
-    const typeCol   = cam.t === 'v' ? '#00aaff'   : cam.t === 'h' ? '#cc88ff' : '#00ff88';
+    const typeLabel = isSundersOnly ? 'OSM LOCATION' : cam.t === 'v' ? 'LIVE VIDEO' : cam.t === 'h' ? 'HYBRID' : 'SNAPSHOT';
+    const typeCol   = isSundersOnly ? '#ff9900' : cam.t === 'v' ? '#00aaff'   : cam.t === 'h' ? '#cc88ff' : '#00ff88';
 
     _panel.innerHTML = `
       <div style="padding:8px 12px;background:rgba(0,255,136,0.06);border-bottom:1px solid rgba(0,255,136,0.2);display:flex;justify-content:space-between;align-items:center">
@@ -146,7 +148,17 @@ function renderPanel(cam) {
           ${cam.a.toFixed(5)}° · ${cam.o.toFixed(5)}°
         </div>
 
-        ${hasVideo ? `
+        ${isSundersOnly ? `
+          <div style="background:rgba(255,153,0,0.08);border:1px solid rgba(255,153,0,0.25);padding:8px;border-radius:2px;font-size:9px;line-height:1.4;color:rgba(255,153,0,0.8)">
+            <div style="margin-bottom:6px"><strong>OpenStreetMap Surveillance Location</strong></div>
+            ${cam.y ? `<div>Type: <span style="color:rgba(255,153,0,1)">${cam.y}</span></div>` : ''}
+            ${cam.z ? `<div>Operator: <span style="color:rgba(255,153,0,1)">${cam.z}</span></div>` : ''}
+            ${cam.d ? `<div>Direction: <span style="color:rgba(255,153,0,1)">${cam.d}°</span></div>` : ''}
+            ${cam.k ? `<div>Height: <span style="color:rgba(255,153,0,1)">${cam.k}m</span></div>` : ''}
+            ${cam.m ? `<div>Manufacturer: <span style="color:rgba(255,153,0,1)">${cam.m}</span></div>` : ''}
+            <div style="margin-top:6px;color:rgba(255,153,0,0.6);font-size:8px">No live feed available · Location source: OpenStreetMap</div>
+          </div>
+        ` : hasVideo ? `
           <div style="background:#000;position:relative;overflow:hidden;border:1px solid rgba(0,170,255,0.25)">
             <video id="cctv-video"
               autoplay muted playsinline controls
@@ -305,6 +317,11 @@ async function _spawnEntities(key) {
         camVideoUrl: cam.x,       // video URL (new field for dual-URL support)
         camFeedType: cam.t,
         camSource:   cam.s,
+        camType:     cam.y,      // sunders: camera type
+        camOperator: cam.z,      // sunders: operator
+        camDirect:   cam.d,      // sunders: direction (degrees)
+        camHeight:   cam.k,      // sunders: height (meters)
+        camMfg:      cam.m,      // sunders: manufacturer
       },
     });
     
@@ -445,6 +462,11 @@ function _applyServerSnapshotCameras(cameras) {
         camVideoUrl: cam.x,       // video URL (new field for dual-URL support)
         camFeedType: cam.t,
         camSource:   cam.s,
+        camType:     cam.y,      // sunders: camera type
+        camOperator: cam.z,      // sunders: operator
+        camDirect:   cam.d,      // sunders: direction (degrees)
+        camHeight:   cam.k,      // sunders: height (meters)
+        camMfg:      cam.m,      // sunders: manufacturer
       },
     });
     
@@ -584,6 +606,11 @@ export async function initCCTV(viewer) {
       x: props.camVideoUrl?.getValue(),  // video URL from dual-URL schema
       t: props.camFeedType?.getValue(),
       s: props.camSource?.getValue(),
+      y: props.camType?.getValue(),      // sunders: camera type
+      z: props.camOperator?.getValue(),  // sunders: operator
+      d: props.camDirect?.getValue(),    // sunders: direction
+      k: props.camHeight?.getValue(),    // sunders: height
+      m: props.camMfg?.getValue(),       // sunders: manufacturer
     });
   }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
 
