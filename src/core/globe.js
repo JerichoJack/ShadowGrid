@@ -69,9 +69,18 @@ function applySceneSettings(viewer) {
   const scene = viewer.scene;
   scene.backgroundColor                = Cesium.Color.BLACK;
   scene.fog.enabled                    = false;
-  scene.globe.enableLighting           = false;
+  scene.globe.enableLighting           = true;
+  scene.globe.dynamicAtmosphereLighting = true;
+  scene.globe.dynamicAtmosphereLightingFromSun = true;
+  scene.globe.showGroundAtmosphere     = true;
+  scene.skyAtmosphere.show             = true;
   scene.globe.depthTestAgainstTerrain  = true;
   scene.postProcessStages.fxaa.enabled = true;
+
+  // Keep sun position moving so day/night visibly shifts across the globe.
+  viewer.clock.clockStep = Cesium.ClockStep.SYSTEM_CLOCK_MULTIPLIER;
+  viewer.clock.multiplier = 240;
+  viewer.clock.shouldAnimate = true;
 
   // ── Google Earth-style camera controls ───────────────────────────────────
   const ctrl = viewer.scene.screenSpaceCameraController;

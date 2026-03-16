@@ -9,7 +9,17 @@ import * as Cesium from 'cesium';
 import { followEntity, stopFollow, isFollowing, followingLabel } from '../core/follow.js';
 import { setFollowMode, setFlightGlow, hasAssetModel, setEnrichedTypecode } from '../layers/flights.js';
 import { clearSatelliteSelection, setSatelliteInfoPanelVisible, setSatelliteSelection } from '../layers/satellites.js';
-import { CITIES, flyTo } from '../core/camera.js';
+import {
+  CITIES,
+  flyTo,
+  isAutoRotateEnabled,
+  isOrbitalModeEnabled,
+  resetNorthCamera,
+  setAutoRotate,
+  setOrbitalMode,
+  zoomInCamera,
+  zoomOutCamera,
+} from '../core/camera.js';
 
 const DEV_MODE = ((import.meta.env.VITE_DEVELOPER_MODE ?? import.meta.env.VITE_DEV_MODE ?? 'false').toLowerCase() === 'true');
 const SERVER_HEAVY_MODE = ((import.meta.env.VITE_SERVER_HEAVY_MODE ?? 'false').toLowerCase() === 'true');
@@ -351,7 +361,7 @@ function drawReticle(viewer) {
     position: fixed;
     bottom: 56px;
     right: 16px;
-    pointer-events: none;
+    pointer-events: auto;
     z-index: 10;
     font-family: 'Share Tech Mono', 'Courier New', monospace;
     font-size: 11px;
@@ -371,9 +381,17 @@ function drawReticle(viewer) {
       <div id="hud-cam-alt" style="color:#e8ffe0">ELEV <span style="color:#fff;font-weight:500">–</span></div>
       <div id="hud-cam-heading" style="color:#e8ffe0">HDG  <span style="color:#fff;font-weight:500">–</span></div>
       <div id="hud-cam-pitch" style="color:#e8ffe0;margin-top:2px">PITCH <span style="color:#fff;font-weight:500">–</span></div>
+      <div style="margin-top:6px;border-top:1px solid rgba(0,255,136,0.1);padding-top:6px;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:5px;pointer-events:auto;">
+        <button id="hud-cam-zoom-in" style="background:rgba(0,0,0,0.5);border:1px solid rgba(0,255,136,0.25);color:rgba(0,255,136,0.78);font-family:'Share Tech Mono', monospace;font-size:9px;letter-spacing:0.06em;padding:4px 6px;cursor:pointer;">ZOOM +</button>
+        <button id="hud-cam-zoom-out" style="background:rgba(0,0,0,0.5);border:1px solid rgba(0,255,136,0.25);color:rgba(0,255,136,0.78);font-family:'Share Tech Mono', monospace;font-size:9px;letter-spacing:0.06em;padding:4px 6px;cursor:pointer;">ZOOM −</button>
+        <button id="hud-cam-reset-north" style="background:rgba(0,0,0,0.5);border:1px solid rgba(0,255,136,0.25);color:rgba(0,255,136,0.78);font-family:'Share Tech Mono', monospace;font-size:9px;letter-spacing:0.06em;padding:4px 6px;cursor:pointer;">NORTH</button>
+        <button id="hud-cam-orbital" style="background:rgba(0,0,0,0.5);border:1px solid rgba(0,255,136,0.25);color:rgba(0,255,136,0.78);font-family:'Share Tech Mono', monospace;font-size:9px;letter-spacing:0.06em;padding:4px 6px;cursor:pointer;">ORBITAL</button>
+        <button id="hud-cam-rotate" style="grid-column:1 / span 2;background:rgba(0,0,0,0.5);border:1px solid rgba(0,255,136,0.25);color:rgba(0,255,136,0.78);font-family:'Share Tech Mono', monospace;font-size:9px;letter-spacing:0.06em;padding:4px 6px;cursor:pointer;">ROTATE</button>
+      </div>
     </div>
   `;
   document.body.appendChild(zoomPanel);
+  wireCameraControlButtons(viewer);
 
   // ── Bottom-centre: SYSTEM STATUS ──────────────────────────────────────────
   const statusPanel = document.createElement('div');
@@ -694,6 +712,58 @@ function drawReticle(viewer) {
   updateCameraReadout();
   updateCrosshairPosition();
   renderCanvas();
+}
+
+function wireCameraControlButtons(viewer) {
+  const zoomInBtn = document.getElementById('hud-cam-zoom-in');
+  const zoomOutBtn = document.getElementById('hud-cam-zoom-out');
+  const resetNorthBtn = document.getElementById('hud-cam-reset-north');
+  const orbitalBtn = document.getElementById('hud-cam-orbital');
+  const rotateBtn = document.getElementById('hud-cam-rotate');
+
+  if (!zoomInBtn || !zoomOutBtn || !resetNorthBtn || !orbitalBtn || !rotateBtn) return;
+
+  const paintToggle = (btn, active) => {
+    btn.style.background = active ? 'rgba(0,255,136,0.18)' : 'rgba(0,0,0,0.5)';
+    btn.style.borderColor = active ? 'rgba(0,255,136,0.58)' : 'rgba(0,255,136,0.25)';
+    btn.style.color = active ? '#00ff88' : 'rgba(0,255,136,0.78)';
+  };
+
+  const syncState = () => {
+    paintToggle(orbitalBtn, isOrbitalModeEnabled(viewer));
+    paintToggle(rotateBtn, isAutoRotateEnabled(viewer));
+  };
+
+  zoomInBtn.addEventListener('click', () => {
+    zoomInCamera(viewer);
+  });
+
+  zoomOutBtn.addEventListener('click', () => {
+    zoomOutCamera(viewer);
+  });
+
+  resetNorthBtn.addEventListener('click', () => {
+    resetNorthCamera(viewer);
+  });
+
+  orbitalBtn.addEventListener('click', () => {
+    const next = !isOrbitalModeEnabled(viewer);
+    setOrbitalMode(viewer, next);
+    syncState();
+  });
+
+  rotateBtn.addEventListener('click', () => {
+    const next = !isAutoRotateEnabled(viewer);
+    setAutoRotate(viewer, next);
+    syncState();
+  });
+
+  window.addEventListener('shadowgrid:follow', () => {
+    setAutoRotate(viewer, false);
+    syncState();
+  });
+
+  syncState();
 }
 
 // ── Location search (city presets + OpenStreetMap Nominatim fallback) ──────
