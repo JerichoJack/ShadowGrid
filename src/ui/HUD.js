@@ -590,18 +590,30 @@ function drawReticle(viewer) {
         <button id="satellite-modal-close" style="background:none;border:none;color:rgba(0,255,136,0.7);font-size:14px;cursor:pointer;padding:4px 8px;">✕</button>
       </div>
       <div style="padding:16px;display:flex;flex-direction:column;gap:12px;">
-        <div>
-          <label style="display:block;font-family:'Share Tech Mono',monospace;font-size:9px;letter-spacing:0.1em;color:rgba(0,255,136,0.6);margin-bottom:4px;text-transform:uppercase;">Location</label>
-          <input id="satellite-location-input" type="text" placeholder="Search location or enter coordinates..." style="width:100%;padding:8px 10px;background:rgba(0,0,0,0.5);border:1px solid rgba(0,255,136,0.25);color:#00ff88;font-family:'Share Tech Mono',monospace;font-size:10px;outline:none;box-sizing:border-box;"/>
+        <div id="satellite-pick-hint" style="font-family:'Share Tech Mono',monospace;font-size:9px;letter-spacing:0.06em;color:rgba(0,255,136,0.62);padding:8px 10px;background:rgba(0,255,136,0.05);border:1px solid rgba(0,255,136,0.14);">
+          Press the pin button to pick a location.
         </div>
         <div>
-          <label style="display:block;font-family:'Share Tech Mono',monospace;font-size:9px;letter-spacing:0.1em;color:rgba(0,255,136,0.6);margin-bottom:4px;text-transform:uppercase;">Imagery Type</label>
-          <select id="satellite-imagery-type" style="width:100%;padding:8px 10px;background:rgba(0,0,0,0.5);border:1px solid rgba(0,255,136,0.25);color:#00ff88;font-family:'Share Tech Mono',monospace;font-size:10px;outline:none;">
-            <option value="landsat8">Landsat 8 (RGB)</option>
-            <option value="sentinel2">Sentinel-2 (RGB)</option>
-            <option value="ndvi">NDVI (Vegetation)</option>
-            <option value="false-color">False Color (NIR)</option>
+          <label style="display:block;font-family:'Share Tech Mono',monospace;font-size:9px;letter-spacing:0.1em;color:rgba(0,255,136,0.6);margin-bottom:4px;text-transform:uppercase;">Location</label>
+          <div style="display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:center;">
+            <input id="satellite-location-input" type="text" placeholder="Search location or enter coordinates..." style="width:100%;padding:8px 10px;background:rgba(0,0,0,0.5);border:1px solid rgba(0,255,136,0.25);color:#00ff88;font-family:'Share Tech Mono',monospace;font-size:10px;outline:none;box-sizing:border-box;"/>
+            <button id="satellite-pick-btn" style="padding:8px 10px;background:rgba(0,0,0,0.5);border:1px solid rgba(0,255,136,0.35);color:rgba(0,255,136,0.85);font-family:'Share Tech Mono',monospace;font-size:10px;letter-spacing:0.08em;cursor:pointer;min-width:46px;">PIN</button>
+          </div>
+        </div>
+        <div>
+          <label style="display:block;font-family:'Share Tech Mono',monospace;font-size:9px;letter-spacing:0.1em;color:rgba(0,255,136,0.6);margin-bottom:4px;text-transform:uppercase;">Collection</label>
+          <select id="satellite-collection-input" style="width:100%;padding:8px 10px;background:rgba(0,0,0,0.5);border:1px solid rgba(0,255,136,0.25);color:#00ff88;font-family:'Share Tech Mono',monospace;font-size:10px;outline:none;">
+            <option value="COPERNICUS/S2_SR_HARMONIZED|B4,B3,B2">Sentinel-2 SR Harmonized</option>
+            <option value="LANDSAT/LC08/C02/T1_L2|SR_B4,SR_B3,SR_B2">Landsat 8 Collection 2 L2</option>
+            <option value="LANDSAT/LC09/C02/T1_L2|SR_B4,SR_B3,SR_B2">Landsat 9 Collection 2 L2</option>
+            <option value="COPERNICUS/S2_HARMONIZED|B8,B4,B3">Sentinel-2 False Color</option>
+            <option value="MODIS/061/MOD09GA|sur_refl_b01,sur_refl_b04,sur_refl_b03">MODIS Terra Surface Reflectance</option>
           </select>
+        </div>
+        <div>
+          <label style="display:block;font-family:'Share Tech Mono',monospace;font-size:9px;letter-spacing:0.1em;color:rgba(0,255,136,0.6);margin-bottom:4px;text-transform:uppercase;">Bands</label>
+          <input id="satellite-bands-input" type="text" value="B4,B3,B2" placeholder="B4,B3,B2" style="width:100%;padding:8px 10px;background:rgba(0,0,0,0.5);border:1px solid rgba(0,255,136,0.25);color:#00ff88;font-family:'Share Tech Mono',monospace;font-size:10px;outline:none;box-sizing:border-box;"/>
+          <div style="margin-top:4px;font-family:'Share Tech Mono',monospace;font-size:8px;color:rgba(0,255,136,0.45);letter-spacing:0.05em;">Comma-separated band list, for example B4,B3,B2</div>
         </div>
         <div>
           <label style="display:block;font-family:'Share Tech Mono',monospace;font-size:9px;letter-spacing:0.1em;color:rgba(0,255,136,0.6);margin-bottom:4px;text-transform:uppercase;">Date</label>
@@ -819,7 +831,10 @@ function wireCameraControlButtons(viewer) {
   const satelliteModal = document.getElementById('satellite-imagery-modal');
   const satelliteModalClose = document.getElementById('satellite-modal-close');
   const satelliteLocationInput = document.getElementById('satellite-location-input');
-  const satelliteImageryType = document.getElementById('satellite-imagery-type');
+  const satellitePickBtn = document.getElementById('satellite-pick-btn');
+  const satellitePickHint = document.getElementById('satellite-pick-hint');
+  const satelliteCollectionInput = document.getElementById('satellite-collection-input');
+  const satelliteBandsInput = document.getElementById('satellite-bands-input');
   const satelliteDateInput = document.getElementById('satellite-date-input');
   const satelliteLoadBtn = document.getElementById('satellite-load-btn');
   const satelliteApplyBtn = document.getElementById('satellite-apply-btn');
@@ -829,7 +844,9 @@ function wireCameraControlButtons(viewer) {
   if (!zoomInBtn || !zoomOutBtn || !resetNorthBtn || !orbitalBtn || !rotateBtn) return;
 
   let currentPreviewUrl = null;
+  let satellitePickArmed = false;
   const EARTH_ENGINE_API_URL = 'https://earthengine.googleapis.com/v1alpha/projects/earthengine-legacy/image:computePixels';
+  const satellitePickHandler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
 
   const paintToggle = (btn, active) => {
     btn.style.background = active ? 'rgba(0,255,136,0.18)' : 'rgba(0,0,0,0.5)';
@@ -863,6 +880,29 @@ function wireCameraControlButtons(viewer) {
       satelliteStatus.textContent = msg;
       satelliteStatus.style.color = isError ? 'rgba(255,100,100,0.8)' : 'rgba(0,255,136,0.6)';
     }
+  }
+
+  function setSatellitePickMode(active) {
+    satellitePickArmed = active;
+    if (satellitePickBtn) {
+      satellitePickBtn.style.background = active ? 'rgba(0,255,136,0.18)' : 'rgba(0,0,0,0.5)';
+      satellitePickBtn.style.borderColor = active ? 'rgba(0,255,136,0.58)' : 'rgba(0,255,136,0.35)';
+      satellitePickBtn.style.color = active ? '#00ff88' : 'rgba(0,255,136,0.85)';
+    }
+    if (satellitePickHint) {
+      satellitePickHint.textContent = active
+        ? 'Click anywhere on the globe to pick a location.'
+        : 'Press the pin button to pick a location.';
+      satellitePickHint.style.color = active ? '#00ff88' : 'rgba(0,255,136,0.62)';
+    }
+    document.body.style.cursor = active ? 'crosshair' : '';
+  }
+
+  function applyCollectionPreset() {
+    if (!satelliteCollectionInput || !satelliteBandsInput) return;
+    const raw = satelliteCollectionInput.value;
+    const [, defaultBands] = raw.split('|');
+    if (defaultBands) satelliteBandsInput.value = defaultBands;
   }
 
   function positionSatelliteModal() {
@@ -927,7 +967,7 @@ function wireCameraControlButtons(viewer) {
   /**
    * Build Earth Engine thumbnail URL for satellite imagery
    */
-  function buildEarthEngineUrl(lat, lon, imageryType, dateStr) {
+  function buildEarthEngineUrl(lat, lon, collectionId, bands, dateStr) {
     // Generate a simple Earth Engine visualization thumbnail
     // Using Earth Engine's public thumbnail service without API key for demo
     const zoom = 11;
@@ -939,7 +979,7 @@ function wireCameraControlButtons(viewer) {
     const baseUrl = 'https://earthengine.googleapis.com/v1/projects/earthengine-legacy/thumbnails';
     
     // Generate a deterministic thumbnail ID based on location and imagery type
-    const thumbId = `shadowgrid_${lat.toFixed(4)}_${lon.toFixed(4)}_${imageryType}_${dateStr || 'latest'}`;
+    const thumbId = `shadowgrid_${lat.toFixed(4)}_${lon.toFixed(4)}_${collectionId}_${bands}_${dateStr || 'latest'}`;
     const hash = btoa(thumbId).replace(/[^a-zA-Z0-9]/g, '').substring(0, 32);
     
     // Return a thumbnail URL pattern consistent with Earth Engine API
@@ -964,15 +1004,17 @@ function wireCameraControlButtons(viewer) {
 
     try {
       // Build Earth Engine thumbnail URL
-      const imageryType = satelliteImageryType.value;
+      const collectionRaw = satelliteCollectionInput?.value ?? 'COPERNICUS/S2_SR_HARMONIZED|B4,B3,B2';
+      const [collectionId] = collectionRaw.split('|');
+      const bands = (satelliteBandsInput?.value ?? '').trim() || 'B4,B3,B2';
       const dateStr = satelliteDateInput.value || '';
-      const thumbUrl = buildEarthEngineUrl(location.lat, location.lon, imageryType, dateStr);
+      const thumbUrl = buildEarthEngineUrl(location.lat, location.lon, collectionId, bands, dateStr);
       
       currentPreviewUrl = thumbUrl;
 
       // Display placeholder with actual Earth Engine URL pattern
       if (satellitePreview) {
-        satellitePreview.style.background = `linear-gradient(135deg, rgba(0,255,136,0.1) 0%, rgba(0,150,100,0.05) 100%), url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><rect fill="%23001a0f" width="512" height="512"/><text x="50%25" y="40%25" dominant-baseline="middle" text-anchor="middle" font-family="monospace" font-size="12" fill="%2300ff88" opacity="0.6">SATELLITE PREVIEW</text><text x="50%25" y="55%25" dominant-baseline="middle" text-anchor="middle" font-family="monospace" font-size="10" fill="%2300ff88" opacity="0.4">${imageryType.toUpperCase()}</text><text x="50%25" y="70%25" dominant-baseline="middle" text-anchor="middle" font-family="monospace" font-size="9" fill="%2300ff88" opacity="0.3">${location.lat.toFixed(4)}°, ${location.lon.toFixed(4)}°</text></svg>')`;
+        satellitePreview.style.background = `linear-gradient(135deg, rgba(0,255,136,0.1) 0%, rgba(0,150,100,0.05) 100%), url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><rect fill="%23001a0f" width="512" height="512"/><text x="50%25" y="36%25" dominant-baseline="middle" text-anchor="middle" font-family="monospace" font-size="12" fill="%2300ff88" opacity="0.6">SATELLITE PREVIEW</text><text x="50%25" y="50%25" dominant-baseline="middle" text-anchor="middle" font-family="monospace" font-size="9" fill="%2300ff88" opacity="0.45">${collectionId}</text><text x="50%25" y="60%25" dominant-baseline="middle" text-anchor="middle" font-family="monospace" font-size="9" fill="%2300ff88" opacity="0.4">BANDS ${bands}</text><text x="50%25" y="72%25" dominant-baseline="middle" text-anchor="middle" font-family="monospace" font-size="9" fill="%2300ff88" opacity="0.3">${location.lat.toFixed(4)}°, ${location.lon.toFixed(4)}°</text></svg>')`;
         satellitePreview.style.backgroundSize = 'contain';
         satellitePreview.style.backgroundRepeat = 'no-repeat';
         satellitePreview.style.backgroundPosition = 'center';
@@ -1038,8 +1080,26 @@ function wireCameraControlButtons(viewer) {
     });
   }
 
+  if (satelliteCollectionInput) {
+    satelliteCollectionInput.addEventListener('change', applyCollectionPreset);
+  }
+
+  if (satellitePickBtn) {
+    satellitePickBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setSatellitePickMode(!satellitePickArmed);
+      if (satellitePickArmed) {
+        setSatelliteStatus('Click on the globe to pick a location.');
+      } else {
+        setSatelliteStatus('Pick cancelled.');
+      }
+    });
+  }
+
   if (satelliteModalClose) {
     satelliteModalClose.addEventListener('click', () => {
+      setSatellitePickMode(false);
       if (satelliteModal) satelliteModal.hidden = true;
     });
   }
@@ -1047,6 +1107,7 @@ function wireCameraControlButtons(viewer) {
   document.addEventListener('click', (e) => {
     if (!satelliteModal || satelliteModal.hidden) return;
     if (satelliteModal.contains(e.target) || imageryDropdownBtn?.contains(e.target)) return;
+    setSatellitePickMode(false);
     satelliteModal.hidden = true;
   });
 
@@ -1063,6 +1124,28 @@ function wireCameraControlButtons(viewer) {
   if (satelliteApplyBtn) {
     satelliteApplyBtn.addEventListener('click', applySatelliteImagery);
   }
+
+  satellitePickHandler.setInputAction((click) => {
+    if (!satellitePickArmed || !satelliteLocationInput) return;
+    const ray = viewer.camera.getPickRay(click.position);
+    let cartesian = viewer.scene.globe.pick(ray, viewer.scene);
+    if (!cartesian) {
+      cartesian = viewer.camera.pickEllipsoid(click.position, viewer.scene.globe.ellipsoid);
+    }
+    if (!cartesian) {
+      setSatelliteStatus('Unable to pick that location.', true);
+      return;
+    }
+
+    const cartographic = Cesium.Cartographic.fromCartesian(cartesian);
+    const lat = Cesium.Math.toDegrees(cartographic.latitude);
+    const lon = Cesium.Math.toDegrees(cartographic.longitude);
+    satelliteLocationInput.value = `${lat.toFixed(6)}, ${lon.toFixed(6)}`;
+    setSatellitePickMode(false);
+    setSatelliteStatus(`Picked ${lat.toFixed(4)}, ${lon.toFixed(4)}`);
+  }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
+
+  applyCollectionPreset();
 
   // Allow Enter to load
   if (satelliteLocationInput) {
