@@ -13,6 +13,8 @@ const SERVER_HEAVY_MODE = (import.meta.env.VITE_SERVER_HEAVY_MODE ?? 'false').to
 const GOOGLE_KEY   =  import.meta.env.VITE_GOOGLE_MAPS_API_KEY ?? '';
 const CESIUM_TOKEN =  import.meta.env.VITE_CESIUM_ION_TOKEN    ?? '';
 const MAPTILER_KEY =  import.meta.env.VITE_MAPTILER_API_KEY    ?? '';
+const DAYNIGHT_TIME_MODE = (import.meta.env.VITE_DAYNIGHT_TIME_MODE ?? 'realtime').toLowerCase();
+const DAYNIGHT_TIME_MULTIPLIER = Number(import.meta.env.VITE_DAYNIGHT_TIME_MULTIPLIER ?? '240');
 
 const GOOGLE_TILESET_URL = SERVER_HEAVY_MODE
   ? '/api/localproxy/tiles/google/v1/3dtiles/root.json'
@@ -77,10 +79,20 @@ function applySceneSettings(viewer) {
   scene.globe.depthTestAgainstTerrain  = true;
   scene.postProcessStages.fxaa.enabled = true;
 
-  // Keep sun position moving so day/night visibly shifts across the globe.
-  viewer.clock.clockStep = Cesium.ClockStep.SYSTEM_CLOCK_MULTIPLIER;
-  viewer.clock.multiplier = 240;
-  viewer.clock.shouldAnimate = true;
+  // Use real UTC by default so the terminator matches current time accurately.
+  // Optional cinematic mode can be enabled via env vars when desired.
+  if (DAYNIGHT_TIME_MODE === 'accelerated') {
+    viewer.clock.clockStep = Cesium.ClockStep.SYSTEM_CLOCK_MULTIPLIER;
+    viewer.clock.multiplier = Number.isFinite(DAYNIGHT_TIME_MULTIPLIER)
+      ? DAYNIGHT_TIME_MULTIPLIER
+      : 240;
+    viewer.clock.shouldAnimate = true;
+  } else {
+    viewer.clock.clockStep = Cesium.ClockStep.SYSTEM_CLOCK;
+    viewer.clock.multiplier = 1;
+    viewer.clock.shouldAnimate = true;
+    viewer.clock.currentTime = Cesium.JulianDate.now();
+  }
 
   // ── Google Earth-style camera controls ───────────────────────────────────
   const ctrl = viewer.scene.screenSpaceCameraController;
