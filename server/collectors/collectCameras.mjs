@@ -328,69 +328,86 @@ async function fetchSource(s, idx, total) {
 /** Fetch and enrich cameras with sunders.uber.space OSM surveillance data */
 async function enrichWithSunders(cameras) {
   const SUNDERS_API = 'https://sunders.uber.space/camera.php';
-  const MATCH_RADIUS = 0.01; // ~1km at equator
+  const MATCH_RADIUS = 0.01;  // ~1km at equator, in degrees
+  const GRID_SIZE = 10;       // 10°×10° spatial grid cells to avoid O(n*m) explosion
   let enrichedCount = 0;
 
   try {
     console.log(`\n  Enriching with sunders.uber.space OSM data...`);
     
-    // Build geographic bounds from cameras
-    const lats = cameras.map(c => c.lat);
-    const lngs = cameras.map(c => c.lng);
-    const minLat = Math.min(...lats);
-    const maxLat = Math.max(...lats);
-    const minLng = Math.min(...lngs);
-    const maxLng = Math.max(...lngs);
-    
-    // Fetch sunders data for all bounds
-    const params = new URLSearchParams({
-      bbox: `${minLng},${minLat},${maxLng},${maxLat}`,
-      format: 'json',
-    });
-    const sunUrl = `${SUNDERS_API}?${params}`;
-    console.log(`    Fetching from ${SUNDERS_API} for bounds...`);
-    
-    const res = await fetch(sunUrl, { 
-      signal: AbortSignal.timeout(60_000),
-      headers: { 'User-Agent': 'ShadowGrid-Collector/1.0' },
-    });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    
-    const sunders = await res.json();
-    if (!Array.isArray(sunders)) throw new Error('Unexpected response format (expected array)');
-    console.log(`    Retrieved ${sunders.length} OSM surveillance nodes`);
-    
-    // Match cameras to sunders nodes by proximity
+    // Group cameras into spatial grid cells to limit matching scope
+    const grid = new Map();
     for (const cam of cameras) {
-      for (const sun of sunders) {
-        const sunLat = parseFloat(sun.lat);
-        const sunLng = parseFloat(sun.lon);
-        if (!isFinite(sunLat) || !isFinite(sunLng)) continue;
+      const cellLat = Math.floor(cam.lat / GRID_SIZE) * GRID_SIZE;
+      const cellLng = Math.floor(cam.lng / GRID_SIZE) * GRID_SIZE;
+      const key = `${cellLat},${cellLng}`;
+      if (!grid.has(key)) grid.set(key, []);
+      grid.get(key).push(cam);
+    }
+    
+    console.log(`    Grouped ${cameras.length} cameras into ${grid.size} grid cells`);
+    
+    // Process each grid cell independently
+    let cellCount = 0;
+    for (const [cellKey, cellCameras] of grid) {
+      cellCount++;
+      const [cellLat, cellLng] = cellKey.split(',').map(Number);
+      const bounds = {
+        minLat: cellLat,
+        maxLat: cellLat + GRID_SIZE,
+        minLng: cellLng,
+        maxLng: cellLng + GRID_SIZE,
+      };
+      
+      try {
+        // Fetch sunders data for this grid cell only
+        const params = new URLSearchParams({
+          bbox: `${bounds.minLng},${bounds.minLat},${bounds.maxLng},${bounds.maxLat}`,
+          format: 'json',
+        });
+        const sunUrl = `${SUNDERS_API}?${params}`;
         
-        const latDist = Math.abs(cam.lat - sunLat);
-        const lngDist = Math.abs(cam.lng - sunLng);
+        const res = await fetch(sunUrl, { 
+          signal: AbortSignal.timeout(30_000),
+          headers: { 'User-Agent': 'ShadowGrid-Collector/1.0' },
+        });
+        if (!res.ok) continue;  // Skip cells with no data
         
-        // Simple proximity check (could be improved with great-circle distance)
-        if (latDist + lngDist < MATCH_RADIUS) {
-          // Matched — populate sunders fields
-          if (sun.tags?.camera_type) {
-            cam.sundersType = sun.tags.camera_type;
+        const sunders = await res.json();
+        if (!Array.isArray(sunders) || sunders.length === 0) continue;
+        
+        // Match cameras in this cell to sunders nodes in this cell
+        for (const cam of cellCameras) {
+          for (const sun of sunders) {
+            const sunLat = parseFloat(sun.lat);
+            const sunLng = parseFloat(sun.lon);
+            if (!isFinite(sunLat) || !isFinite(sunLng)) continue;
+            
+            const latDist = Math.abs(cam.lat - sunLat);
+            const lngDist = Math.abs(cam.lng - sunLng);
+            
+            if (latDist + lngDist < MATCH_RADIUS) {
+              // Matched — populate sunders fields
+              if (sun.tags?.camera_type) cam.sundersType = sun.tags.camera_type;
+              if (sun.tags?.operator) cam.sundersOperator = sun.tags.operator;
+              if (sun.tags?.camera_direction) cam.sundersDirection = parseFloat(sun.tags.camera_direction);
+              if (sun.tags?.height) cam.sundersHeight = parseFloat(sun.tags.height);
+              enrichedCount++;
+              break;  // Use first match, move to next camera
+            }
           }
-          if (sun.tags?.operator) {
-            cam.sundersOperator = sun.tags.operator;
-          }
-          if (sun.tags?.camera_direction) {
-            cam.sundersDirection = parseFloat(sun.tags.camera_direction);
-          }
-          if (sun.tags?.height) {
-            cam.sundersHeight = parseFloat(sun.tags.height);
-          }
-          enrichedCount++;
-          break; // Use first match, move to next camera
         }
+      } catch {
+        // Grid cell fetch failed — continue to next cell
+      }
+      
+      // Log progress every 10 cells
+      if (cellCount % 10 === 0) {
+        process.stdout.write(`\r    Processing grid cell ${cellCount}/${grid.size} (${enrichedCount} matches so far)`);
       }
     }
-    console.log(`    Enriched ${enrichedCount} cameras with OSM metadata`);
+    
+    console.log(`\r    Enriched ${enrichedCount} cameras with OSM metadata (${grid.size} cells scanned)`);
   } catch (err) {
     console.warn(`    Sunders enrichment failed (optional): ${err.message}`);
     // Non-fatal — continue without sunders data
