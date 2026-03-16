@@ -386,7 +386,8 @@ function drawReticle(viewer) {
         <button id="hud-cam-zoom-out" style="background:rgba(0,0,0,0.5);border:1px solid rgba(0,255,136,0.25);color:rgba(0,255,136,0.78);font-family:'Share Tech Mono', monospace;font-size:9px;letter-spacing:0.06em;padding:4px 6px;cursor:pointer;">ZOOM −</button>
         <button id="hud-cam-reset-north" style="background:rgba(0,0,0,0.5);border:1px solid rgba(0,255,136,0.25);color:rgba(0,255,136,0.78);font-family:'Share Tech Mono', monospace;font-size:9px;letter-spacing:0.06em;padding:4px 6px;cursor:pointer;">NORTH</button>
         <button id="hud-cam-orbital" style="background:rgba(0,0,0,0.5);border:1px solid rgba(0,255,136,0.25);color:rgba(0,255,136,0.78);font-family:'Share Tech Mono', monospace;font-size:9px;letter-spacing:0.06em;padding:4px 6px;cursor:pointer;">LABELS</button>
-        <button id="hud-cam-rotate" style="grid-column:1 / span 2;background:rgba(0,0,0,0.5);border:1px solid rgba(0,255,136,0.25);color:rgba(0,255,136,0.78);font-family:'Share Tech Mono', monospace;font-size:9px;letter-spacing:0.06em;padding:4px 6px;cursor:pointer;">ROTATE</button>
+        <button id="hud-cam-imagery" style="background:rgba(0,0,0,0.5);border:1px solid rgba(0,255,136,0.25);color:rgba(0,255,136,0.78);font-family:'Share Tech Mono', monospace;font-size:9px;letter-spacing:0.06em;padding:4px 6px;cursor:pointer;">SAT IMG</button>
+        <button id="hud-cam-rotate" style="background:rgba(0,0,0,0.5);border:1px solid rgba(0,255,136,0.25);color:rgba(0,255,136,0.78);font-family:'Share Tech Mono', monospace;font-size:9px;letter-spacing:0.06em;padding:4px 6px;cursor:pointer;">ROTATE</button>
       </div>
     </div>
   `;
@@ -719,9 +720,12 @@ function wireCameraControlButtons(viewer) {
   const zoomOutBtn = document.getElementById('hud-cam-zoom-out');
   const resetNorthBtn = document.getElementById('hud-cam-reset-north');
   const orbitalBtn = document.getElementById('hud-cam-orbital');
+  const imageryBtn = document.getElementById('hud-cam-imagery');
   const rotateBtn = document.getElementById('hud-cam-rotate');
 
   if (!zoomInBtn || !zoomOutBtn || !resetNorthBtn || !orbitalBtn || !rotateBtn) return;
+
+  let satelliteImageryEnabled = true; // Start with imagery enabled
 
   const paintToggle = (btn, active) => {
     btn.style.background = active ? 'rgba(0,255,136,0.18)' : 'rgba(0,0,0,0.5)';
@@ -745,6 +749,7 @@ function wireCameraControlButtons(viewer) {
     const labelsOn = !isOrbitalModeEnabled(viewer);
     paintLabelsToggle(orbitalBtn, labelsOn);
     paintToggle(rotateBtn, isAutoRotateEnabled(viewer));
+    paintToggle(imageryBtn, satelliteImageryEnabled);
   };
 
   zoomInBtn.addEventListener('click', () => {
@@ -766,6 +771,35 @@ function wireCameraControlButtons(viewer) {
     setOrbitalMode(viewer, !nextLabelsOn);
     syncState();
   });
+
+  if (imageryBtn) {
+    imageryBtn.addEventListener('click', () => {
+      satelliteImageryEnabled = !satelliteImageryEnabled;
+      // Toggle satellite/base imagery layers while keeping labels visible
+      // Strategy: toggle all layers, but preserve label/boundary layers by checking their URLs
+      for (let i = 0; i < viewer.imageryLayers.length; i++) {
+        const layer = viewer.imageryLayers.get(i);
+        if (!layer) continue;
+        
+        const provider = layer._provider;
+        const url = provider?.url || provider?._url || '';
+        const credit = layer._provider?.credit?.text || '';
+        
+        // Keep label/boundary layers visible regardless
+        const isLabelLayer = 
+          url.includes('stamen_toner') ||
+          url.includes('cartocdn') ||
+          credit.includes('CARTO') ||
+          credit.includes('Stadia') ||
+          credit.includes('OpenStreetMap');
+        
+        if (!isLabelLayer) {
+          layer.show = satelliteImageryEnabled;
+        }
+      }
+      syncState();
+    });
+  }
 
   rotateBtn.addEventListener('click', () => {
     const next = !isAutoRotateEnabled(viewer);
