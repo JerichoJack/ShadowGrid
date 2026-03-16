@@ -219,6 +219,7 @@ export function setHUDStatus(msg, level = 'ok') {
 
 // Shared state so coordinate panel can update from camera-change events
 let _hudViewer = null;
+let _hudCrosshairLocation = null;
 
 function drawReticle(viewer) {
   _hudViewer = viewer;
@@ -591,7 +592,7 @@ function drawReticle(viewer) {
       </div>
       <div style="padding:16px;display:flex;flex-direction:column;gap:12px;">
         <div id="satellite-pick-hint" style="font-family:'Share Tech Mono',monospace;font-size:9px;letter-spacing:0.06em;color:rgba(0,255,136,0.62);padding:8px 10px;background:rgba(0,255,136,0.05);border:1px solid rgba(0,255,136,0.14);">
-          Press the pin button to pick a location.
+          Press the pin button to use the current crosshair location.
         </div>
         <div>
           <label style="display:block;font-family:'Share Tech Mono',monospace;font-size:9px;letter-spacing:0.1em;color:rgba(0,255,136,0.6);margin-bottom:4px;text-transform:uppercase;">Location</label>
@@ -778,6 +779,8 @@ function drawReticle(viewer) {
       const lat   = Cesium.Math.toDegrees(carto.latitude);
       const lon   = Cesium.Math.toDegrees(carto.longitude);
       const elev  = carto.height;
+
+      _hudCrosshairLocation = { lat, lon, elev };
 
       const fmt = (v, d) => Math.abs(v).toFixed(d);
 
@@ -1073,12 +1076,13 @@ function wireCameraControlButtons(viewer) {
     satellitePickBtn.addEventListener('click', (e) => {
       e.preventDefault();
       e.stopPropagation();
-      setSatellitePickMode(!satellitePickArmed);
-      if (satellitePickArmed) {
-        setSatelliteStatus('Click on the globe to pick a location.');
-      } else {
-        setSatelliteStatus('Pick cancelled.');
+      if (!_hudCrosshairLocation || !satelliteLocationInput) {
+        setSatelliteStatus('Crosshair location unavailable.', true);
+        return;
       }
+      setSatellitePickMode(false);
+      satelliteLocationInput.value = `${_hudCrosshairLocation.lat.toFixed(6)}, ${_hudCrosshairLocation.lon.toFixed(6)}`;
+      setSatelliteStatus(`Using crosshair ${_hudCrosshairLocation.lat.toFixed(4)}, ${_hudCrosshairLocation.lon.toFixed(4)}`);
     });
   }
 
@@ -1109,26 +1113,6 @@ function wireCameraControlButtons(viewer) {
   if (satelliteApplyBtn) {
     satelliteApplyBtn.addEventListener('click', applySatelliteImagery);
   }
-
-  satellitePickHandler.setInputAction((click) => {
-    if (!satellitePickArmed || !satelliteLocationInput) return;
-    const ray = viewer.camera.getPickRay(click.position);
-    let cartesian = viewer.scene.globe.pick(ray, viewer.scene);
-    if (!cartesian) {
-      cartesian = viewer.camera.pickEllipsoid(click.position, viewer.scene.globe.ellipsoid);
-    }
-    if (!cartesian) {
-      setSatelliteStatus('Unable to pick that location.', true);
-      return;
-    }
-
-    const cartographic = Cesium.Cartographic.fromCartesian(cartesian);
-    const lat = Cesium.Math.toDegrees(cartographic.latitude);
-    const lon = Cesium.Math.toDegrees(cartographic.longitude);
-    satelliteLocationInput.value = `${lat.toFixed(6)}, ${lon.toFixed(6)}`;
-    setSatellitePickMode(false);
-    setSatelliteStatus(`Picked ${lat.toFixed(4)}, ${lon.toFixed(4)}`);
-  }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
 
   applyCollectionPreset();
 
