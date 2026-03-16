@@ -587,9 +587,9 @@ function drawReticle(viewer) {
     position: fixed;
     left: 0;
     top: 0;
-    transform: translateX(-50%);
+    transform: none;
     pointer-events: auto;
-    z-index: 10;
+    z-index: 11;
   `;
   imageryDock.innerHTML = `
     <button id="hud-imagery-dropdown" style="
@@ -631,7 +631,7 @@ function drawReticle(viewer) {
 
   function positionImageryDock() {
     const layersRect = layersDock.getBoundingClientRect();
-    imageryDock.style.left = `${layersRect.right + 6}px`;
+    imageryDock.style.left = `${layersRect.right + 8}px`;
     imageryDock.style.top = `${layersRect.top}px`;
   }
 
