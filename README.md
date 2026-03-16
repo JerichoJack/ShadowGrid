@@ -423,4 +423,5 @@ MIT License — see [LICENSE](LICENSE) for details.
 - [N2YO](https://n2yo.com) — satellite tracking API
 - [satellite.js](https://github.com/shashwatak/satellite-js) — SGP4 orbital propagation
 - [ipapi.co](https://ipapi.co) — IP geolocation for startup camera placement
-- [TrafficVision](https://trafficvision.live/) — aggregated global public traffic camera feed data used to build the CCTV layer; built by [Noah Eisenbruch (NERKTEK)](https://trafficvision.live/)
+- [TrafficVision](https://trafficvision.live/) — aggregated global public traffic camera feed data used to build parts of the CCTV layer; built by [Noah Eisenbruch (NERKTEK)](https://trafficvision.live/)
+- [Surveillance under Surveillance](https://sunders.uber.space/) — project tracking global surveillance cameras, inspired parts of the CCTV layer

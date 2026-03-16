@@ -29,12 +29,13 @@ const GLOBE_COLORS = [
 ];
 
 // ── Icons ──────────────────────────────────────────────────────────────────────
-// Three variants: image-only (green), video (blue), hybrid (purple)
-const ICONS = {
+// Three variants for feed-backed cameras: image-only (green), video (blue), hybrid (purple)
+const FEED_ICONS = {
   i: _icon('#00ff88', '#00cc66'),
   v: _icon('#00aaff', '#0088cc'),
   h: _icon('#cc88ff', '#aa66ee'),
 };
+const OSM_ICON_CACHE = new Map();
 
 function _icon(fill, lens) {
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 22 14" width="22" height="14">
@@ -63,6 +64,7 @@ let _globePoints  = null;       // Cesium.PointPrimitiveCollection — globe-alt
 let _globeReady   = false;      // cameras-globe.json loaded and points built
 let _selectedCameraId = null;   // currently highlighted camera for visual feedback
 let _streamHealthCache = { ts: 0, data: null }; // cached camera stream health probe
+let _selectionOverlayEntities = []; // selected OSM camera FOV overlays
 
 // ── Utility ────────────────────────────────────────────────────────────────────
 
@@ -116,6 +118,280 @@ function destroyHls() {
     _hlsInstance.destroy();
     _hlsInstance = null;
   }
+}
+
+function escapeHtml(value) {
+  return String(value).replace(/[&<>"']/g, (ch) => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;',
+  }[ch]));
+}
+
+function isOsmOnlyCamera(cam) {
+  return cam?.s === 'osm' && !cam?.u && !cam?.x;
+}
+
+function normalizeOsmKind(cam) {
+  const surveillanceType = String(cam?.w || '').toLowerCase();
+  const cameraType = String(cam?.y || '').toLowerCase();
+  if (surveillanceType === 'guard') return 'guard';
+  if (surveillanceType === 'alpr') return 'alpr';
+  if (cameraType === 'fixed') return 'fixed';
+  if (cameraType === 'panning') return 'panning';
+  if (cameraType === 'dome') return 'dome';
+  if (surveillanceType === 'camera') return 'camera';
+  return 'camera';
+}
+
+function getOsmPalette(cam) {
+  const scope = String(cam?.e || '').toLowerCase();
+  if (scope === 'public') {
+    return { fill: '#cf3e36', stroke: '#ff9a93', glow: '#ff8a80', label: 'PUBLIC' };
+  }
+  if (scope === 'indoor') {
+    return { fill: '#2f8f4e', stroke: '#93f0b0', glow: '#7bffac', label: 'INDOOR' };
+  }
+  if (scope === 'outdoor' || scope === 'private') {
+    return { fill: '#225ca8', stroke: '#91c9ff', glow: '#77b7ff', label: 'OUTDOOR' };
+  }
+  return { fill: '#b86d10', stroke: '#ffd19a', glow: '#ffc36f', label: 'SURVEILLANCE' };
+}
+
+function getOsmGlyph(kind) {
+  switch (kind) {
+    case 'fixed':
+      return `
+        <rect x="8" y="11" width="11" height="7" rx="2" fill="#ffffff"/>
+        <circle cx="13.5" cy="14.5" r="2.1" fill="#0b0f12"/>
+        <path d="M19 12.2 L24 10.8 L24 18.2 L19 16.8 Z" fill="#ffffff" opacity="0.95"/>
+        <path d="M23.5 14.5 L28 12.5" stroke="#ffffff" stroke-width="1.8" stroke-linecap="round" opacity="0.95"/>
+      `;
+    case 'panning':
+      return `
+        <rect x="8" y="11" width="11" height="7" rx="2" fill="#ffffff"/>
+        <circle cx="13.5" cy="14.5" r="2.1" fill="#0b0f12"/>
+        <path d="M19 12.2 L24 10.8 L24 18.2 L19 16.8 Z" fill="#ffffff" opacity="0.95"/>
+        <path d="M9 8.2 Q13.5 4.8 18 8.2" stroke="#ffffff" stroke-width="1.6" fill="none" stroke-linecap="round" opacity="0.95"/>
+        <path d="M9.4 8.4 L7.7 8.4 L8.6 6.9" fill="#ffffff" opacity="0.95"/>
+        <path d="M17.6 8.4 L19.3 8.4 L18.4 6.9" fill="#ffffff" opacity="0.95"/>
+      `;
+    case 'dome':
+      return `
+        <path d="M10 13 A6 6 0 0 1 22 13" fill="#ffffff"/>
+        <path d="M9 13 H23 V17.5 Q16 22 9 17.5 Z" fill="#ffffff" opacity="0.96"/>
+        <circle cx="16" cy="15.2" r="2.1" fill="#0b0f12"/>
+      `;
+    case 'guard':
+      return `
+        <circle cx="16" cy="11" r="3.2" fill="#ffffff"/>
+        <path d="M11 22 Q16 15 21 22" stroke="#ffffff" stroke-width="2.3" fill="none" stroke-linecap="round"/>
+        <path d="M12.2 16.3 H19.8" stroke="#ffffff" stroke-width="2.1" stroke-linecap="round"/>
+      `;
+    case 'alpr':
+      return `
+        <rect x="6.5" y="10" width="19" height="11" rx="3" fill="#ffffff"/>
+        <rect x="8.8" y="12.5" width="14.4" height="6" rx="1.2" fill="#0b0f12" opacity="0.9"/>
+        <text x="16" y="17.1" font-size="4.5" text-anchor="middle" fill="#ffffff" font-family="Arial, sans-serif">ALPR</text>
+      `;
+    default:
+      return `
+        <rect x="8" y="11" width="11" height="7" rx="2" fill="#ffffff"/>
+        <circle cx="13.5" cy="14.5" r="2.1" fill="#0b0f12"/>
+        <path d="M19 12.2 L24 10.8 L24 18.2 L19 16.8 Z" fill="#ffffff" opacity="0.95"/>
+      `;
+  }
+}
+
+function getOsmIcon(cam) {
+  const kind = normalizeOsmKind(cam);
+  const palette = getOsmPalette(cam);
+  const key = `${kind}:${palette.fill}`;
+  if (OSM_ICON_CACHE.has(key)) return OSM_ICON_CACHE.get(key);
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 40" width="32" height="40">
+    <path d="M16 38 L10.5 27.5 H21.5 Z" fill="${palette.fill}" opacity="0.95"/>
+    <circle cx="16" cy="16" r="11.2" fill="${palette.fill}" stroke="${palette.stroke}" stroke-width="1.6"/>
+    ${getOsmGlyph(kind)}
+  </svg>`;
+  const icon = 'data:image/svg+xml;base64,' + btoa(svg);
+  OSM_ICON_CACHE.set(key, icon);
+  return icon;
+}
+
+function billboardImageForCamera(cam) {
+  return isOsmOnlyCamera(cam) ? getOsmIcon(cam) : (FEED_ICONS[cam.t] ?? FEED_ICONS.i);
+}
+
+function labelTextForCamera(cam) {
+  if (_selectedCameraId !== cam.i) return '';
+  if (isOsmOnlyCamera(cam)) {
+    return cam.w || cam.y || cam.e || 'OSM';
+  }
+  return cam.s ?? 'Camera';
+}
+
+function destinationPoint(latDeg, lonDeg, bearingDeg, distanceM) {
+  const radiusM = 6378137;
+  const lat1 = Cesium.Math.toRadians(latDeg);
+  const lon1 = Cesium.Math.toRadians(lonDeg);
+  const brng = Cesium.Math.toRadians(bearingDeg);
+  const angDist = distanceM / radiusM;
+  const sinLat1 = Math.sin(lat1);
+  const cosLat1 = Math.cos(lat1);
+  const sinAng = Math.sin(angDist);
+  const cosAng = Math.cos(angDist);
+  const lat2 = Math.asin(sinLat1 * cosAng + cosLat1 * sinAng * Math.cos(brng));
+  const lon2 = lon1 + Math.atan2(
+    Math.sin(brng) * sinAng * cosLat1,
+    cosAng - sinLat1 * Math.sin(lat2),
+  );
+  return {
+    lat: Cesium.Math.toDegrees(lat2),
+    lon: Cesium.Math.toDegrees(lon2),
+  };
+}
+
+function clearSelectionOverlay() {
+  for (const entity of _selectionOverlayEntities) {
+    _ds?.entities.remove(entity);
+  }
+  _selectionOverlayEntities = [];
+}
+
+function estimateFovRangeMeters(cam) {
+  const kind = normalizeOsmKind(cam);
+  const heightM = Number.isFinite(Number(cam.k)) ? Number(cam.k) : 5;
+  const tiltDeg = Number.isFinite(Number(cam.g)) ? Number(cam.g) : 15;
+  const base = heightM / Math.tan(Cesium.Math.toRadians(Cesium.Math.clamp(tiltDeg, 5, 85)));
+  const fallback = heightM * 4.5;
+  const raw = Number.isFinite(base) && base > 0 ? base : fallback;
+  const factor = kind === 'alpr' ? 1.3 : kind === 'panning' ? 1.25 : kind === 'dome' ? 0.9 : 1.0;
+  return Cesium.Math.clamp(raw * factor, 8, 140);
+}
+
+function estimateFovSpreadDegrees(cam) {
+  const kind = normalizeOsmKind(cam);
+  if (kind === 'guard') return 0;
+  if (kind === 'alpr') return 16;
+  if (kind === 'fixed') return 24;
+  if (kind === 'panning') return 80;
+  if (kind === 'dome') return cam.d != null ? 180 : 360;
+  return 38;
+}
+
+function buildSectorPositions(cam, rangeM, spreadDeg) {
+  const direction = Number.isFinite(Number(cam.d)) ? Number(cam.d) : 0;
+  const lat = Number(cam.a);
+  const lon = Number(cam.o);
+  const positions = [Cesium.Cartesian3.fromDegrees(lon, lat, 0)];
+  const start = direction - (spreadDeg / 2);
+  const steps = Math.max(8, Math.ceil(spreadDeg / 10));
+  for (let step = 0; step <= steps; step++) {
+    const bearing = start + (spreadDeg * (step / steps));
+    const pt = destinationPoint(lat, lon, bearing, rangeM);
+    positions.push(Cesium.Cartesian3.fromDegrees(pt.lon, pt.lat, 0));
+  }
+  return positions;
+}
+
+function renderSelectionOverlay(cam) {
+  clearSelectionOverlay();
+  if (!isOsmOnlyCamera(cam) || !_ds) return;
+  const kind = normalizeOsmKind(cam);
+  if (kind === 'guard') return;
+
+  const palette = getOsmPalette(cam);
+  const fillColor = Cesium.Color.fromCssColorString(palette.fill).withAlpha(0.18);
+  const edgeColor = Cesium.Color.fromCssColorString(palette.stroke).withAlpha(0.78);
+  const rangeM = estimateFovRangeMeters(cam);
+  const spreadDeg = estimateFovSpreadDegrees(cam);
+  const lat = Number(cam.a);
+  const lon = Number(cam.o);
+
+  if (spreadDeg >= 360) {
+    _selectionOverlayEntities.push(_ds.entities.add({
+      position: Cesium.Cartesian3.fromDegrees(lon, lat, 0),
+      ellipse: {
+        semiMajorAxis: rangeM,
+        semiMinorAxis: rangeM,
+        material: fillColor,
+        outline: true,
+        outlineColor: edgeColor,
+        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+      },
+    }));
+    return;
+  }
+
+  const hierarchy = buildSectorPositions(cam, rangeM, spreadDeg);
+  _selectionOverlayEntities.push(_ds.entities.add({
+    polygon: {
+      hierarchy,
+      material: fillColor,
+      outline: true,
+      outlineColor: edgeColor,
+      perPositionHeight: false,
+      heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+    },
+  }));
+
+  if (cam.d != null) {
+    const tip = destinationPoint(lat, lon, Number(cam.d), rangeM);
+    _selectionOverlayEntities.push(_ds.entities.add({
+      polyline: {
+        positions: [
+          Cesium.Cartesian3.fromDegrees(lon, lat, 0),
+          Cesium.Cartesian3.fromDegrees(tip.lon, tip.lat, 0),
+        ],
+        width: 2,
+        clampToGround: true,
+        material: edgeColor,
+      },
+    }));
+  }
+}
+
+function fieldRow(label, value, accentColor, href = null) {
+  if (value == null || value === '') return '';
+  const safeValue = escapeHtml(value);
+  const rendered = href
+    ? `<a href="${href}" target="_blank" rel="noopener noreferrer" style="color:${accentColor};text-decoration:underline">${safeValue}</a>`
+    : `<span style="color:${accentColor}">${safeValue}</span>`;
+  return `<div style="display:grid;grid-template-columns:108px 1fr;gap:8px;align-items:start"><div style="color:rgba(224,255,232,0.55)">${escapeHtml(label)}</div><div>${rendered}</div></div>`;
+}
+
+function renderOsmDetails(cam, accentColor) {
+  const objectType = cam.p || 'node';
+  const objectId = cam.q || cam.i;
+  const osmHref = cam.q ? `https://www.openstreetmap.org/${encodeURIComponent(objectType)}/${encodeURIComponent(cam.q)}` : null;
+  const rows = [
+    fieldRow('id', objectId, accentColor, osmHref),
+    fieldRow('latitude', String(cam.a), accentColor),
+    fieldRow('longitude', String(cam.o), accentColor),
+    fieldRow('camera:mount', cam.r, accentColor),
+    fieldRow('camera:type', cam.y, accentColor),
+    fieldRow('direction', cam.d != null ? `${cam.d}` : null, accentColor),
+    fieldRow('camera:angle', cam.g != null ? `${cam.g}` : null, accentColor),
+    fieldRow('man_made', 'surveillance', accentColor),
+    fieldRow('manufacturer', cam.m, accentColor),
+    fieldRow('manufacturer:wikidata', cam.f, accentColor),
+    fieldRow('surveillance', cam.e, accentColor),
+    fieldRow('surveillance:type', cam.w, accentColor),
+    fieldRow('surveillance:zone', cam.j, accentColor),
+    fieldRow('height', cam.k != null ? `${cam.k} m` : null, accentColor),
+    fieldRow('operator', cam.z, accentColor),
+    fieldRow('timestamp', cam.n, accentColor),
+    fieldRow('version', cam.b != null ? `${cam.b}` : null, accentColor),
+  ].filter(Boolean).join('');
+
+  return `
+    <div style="background:rgba(255,255,255,0.04);border:1px solid ${accentColor}44;padding:10px;border-radius:2px;font-size:9px;line-height:1.45;color:rgba(255,255,255,0.85)">
+      <div style="margin-bottom:8px;color:${accentColor};font-size:10px;letter-spacing:0.08em;text-transform:uppercase">OpenStreetMap Surveillance Object</div>
+      <div style="display:grid;gap:4px">${rows}</div>
+      <div style="margin-top:8px;color:rgba(255,255,255,0.55);font-size:8px">No live feed available. Marker icon, color, and field of view are derived from OSM surveillance tags.</div>
+    </div>`;
 }
 // ── DOM Panel ──────────────────────────────────────────────────────────────────
 
@@ -174,8 +450,14 @@ function renderPanel(cam) {
     }
     
     const isSundersOnly = !videoUrl && !imageUrl;
-    const typeLabel = isSundersOnly ? 'OSM LOCATION' : cam.t === 'v' ? 'LIVE VIDEO' : cam.t === 'h' ? 'HYBRID' : 'SNAPSHOT';
-    const typeCol   = isSundersOnly ? '#ff9900' : cam.t === 'v' ? '#00aaff'   : cam.t === 'h' ? '#cc88ff' : '#00ff88';
+    const osmPalette = isSundersOnly ? getOsmPalette(cam) : null;
+    const osmKind = isSundersOnly ? normalizeOsmKind(cam) : null;
+    const typeLabel = isSundersOnly
+      ? `OSM ${String(cam.w || cam.y || osmKind || 'camera').toUpperCase()}`
+      : cam.t === 'v' ? 'LIVE VIDEO' : cam.t === 'h' ? 'HYBRID' : 'SNAPSHOT';
+    const typeCol   = isSundersOnly ? osmPalette.fill : cam.t === 'v' ? '#00aaff'   : cam.t === 'h' ? '#cc88ff' : '#00ff88';
+
+    renderSelectionOverlay(cam);
 
     _panel.innerHTML = `
       <div style="padding:8px 12px;background:rgba(0,255,136,0.06);border-bottom:1px solid rgba(0,255,136,0.2);display:flex;justify-content:space-between;align-items:center">
@@ -195,17 +477,7 @@ function renderPanel(cam) {
           </div>
         ` : ''}
 
-        ${isSundersOnly ? `
-          <div style="background:rgba(255,153,0,0.08);border:1px solid rgba(255,153,0,0.25);padding:8px;border-radius:2px;font-size:9px;line-height:1.4;color:rgba(255,153,0,0.8)">
-            <div style="margin-bottom:6px"><strong>OpenStreetMap Surveillance Location</strong></div>
-            ${cam.y ? `<div>Type: <span style="color:rgba(255,153,0,1)">${cam.y}</span></div>` : ''}
-            ${cam.z ? `<div>Operator: <span style="color:rgba(255,153,0,1)">${cam.z}</span></div>` : ''}
-            ${cam.d ? `<div>Direction: <span style="color:rgba(255,153,0,1)">${cam.d}°</span></div>` : ''}
-            ${cam.k ? `<div>Height: <span style="color:rgba(255,153,0,1)">${cam.k}m</span></div>` : ''}
-            ${cam.m ? `<div>Manufacturer: <span style="color:rgba(255,153,0,1)">${cam.m}</span></div>` : ''}
-            <div style="margin-top:6px;color:rgba(255,153,0,0.6);font-size:8px">No live feed available · Location source: OpenStreetMap</div>
-          </div>
-        ` : hasPlayableVideo ? `
+        ${isSundersOnly ? renderOsmDetails(cam, typeCol) : hasPlayableVideo ? `
           <div style="background:#000;position:relative;overflow:hidden;border:1px solid rgba(0,170,255,0.25)">
             <video id="cctv-video"
               autoplay muted playsinline controls
@@ -245,6 +517,7 @@ function renderPanel(cam) {
       const v = document.getElementById('cctv-video');
       if (v) { v.pause(); v.src = ''; }
       _selectedCameraId = null;  // clear highlight
+      clearSelectionOverlay();
       _panel.style.display = 'none';
     });
 
@@ -383,7 +656,7 @@ async function _spawnEntities(key) {
     const e = _ds.entities.add({
       position: Cesium.Cartesian3.fromDegrees(cam.o, cam.a, 0),
       billboard: {
-        image:                    ICONS[cam.t] ?? ICONS.i,
+        image:                    billboardImageForCamera(cam),
         verticalOrigin:           Cesium.VerticalOrigin.CENTER,
         horizontalOrigin:         Cesium.HorizontalOrigin.CENTER,
         scale:                    new Cesium.CallbackProperty(() => _selectedCameraId === cam.i ? 2.0 : 1.25, false),
@@ -391,7 +664,7 @@ async function _spawnEntities(key) {
         disableDepthTestDistance: Number.POSITIVE_INFINITY,
       },
       label: {
-        text:             new Cesium.CallbackProperty(() => _selectedCameraId === cam.i ? (cam.s ?? 'Camera') : '', false),
+        text:             new Cesium.CallbackProperty(() => labelTextForCamera(cam), false),
         font:             '12px "Courier New", monospace',
         color:            Cesium.Color.fromCssColorString('#00FF00'),
         outlineColor:     Cesium.Color.fromCssColorString('#000000'),
@@ -415,6 +688,16 @@ async function _spawnEntities(key) {
         camDirect:   cam.d,      // sunders: direction (degrees)
         camHeight:   cam.k,      // sunders: height (meters)
         camMfg:      cam.m,      // sunders: manufacturer
+        camMount:    cam.r,
+        camSurveil:  cam.e,
+        camSurvType: cam.w,
+        camZone:     cam.j,
+        camAngle:    cam.g,
+        camStamp:    cam.n,
+        camVer:      cam.b,
+        camMfgWiki:  cam.f,
+        camOsmType:  cam.p,
+        camOsmObjId: cam.q,
       },
     });
     
@@ -422,7 +705,7 @@ async function _spawnEntities(key) {
     _ds.entities.add({
       position: Cesium.Cartesian3.fromDegrees(cam.o, cam.a, 0),
       billboard: {
-        image:                    ICONS[cam.t] ?? ICONS.i,
+        image:                    billboardImageForCamera(cam),
         verticalOrigin:           Cesium.VerticalOrigin.CENTER,
         horizontalOrigin:         Cesium.HorizontalOrigin.CENTER,
         scale:                    new Cesium.CallbackProperty(() => _selectedCameraId === cam.i ? 3.2 : 0, false),
@@ -528,7 +811,7 @@ function _applyServerSnapshotCameras(cameras) {
     const entity = _ds.entities.add({
       position: Cesium.Cartesian3.fromDegrees(cam.o, cam.a, 0),
       billboard: {
-        image:                    ICONS[cam.t] ?? ICONS.i,
+        image:                    billboardImageForCamera(cam),
         verticalOrigin:           Cesium.VerticalOrigin.CENTER,
         horizontalOrigin:         Cesium.HorizontalOrigin.CENTER,
         scale:                    new Cesium.CallbackProperty(() => _selectedCameraId === camId ? 2.0 : 1.25, false),
@@ -536,7 +819,7 @@ function _applyServerSnapshotCameras(cameras) {
         disableDepthTestDistance: Number.POSITIVE_INFINITY,
       },
       label: {
-        text:             new Cesium.CallbackProperty(() => _selectedCameraId === camId ? (cam.s ?? 'Camera') : '', false),
+        text:             new Cesium.CallbackProperty(() => (_selectedCameraId === camId ? (cam.w || cam.y || cam.s || 'Camera') : ''), false),
         font:             '12px "Courier New", monospace',
         color:            Cesium.Color.fromCssColorString('#00FF00'),
         outlineColor:     Cesium.Color.fromCssColorString('#000000'),
@@ -560,6 +843,16 @@ function _applyServerSnapshotCameras(cameras) {
         camDirect:   cam.d,      // sunders: direction (degrees)
         camHeight:   cam.k,      // sunders: height (meters)
         camMfg:      cam.m,      // sunders: manufacturer
+        camMount:    cam.r,
+        camSurveil:  cam.e,
+        camSurvType: cam.w,
+        camZone:     cam.j,
+        camAngle:    cam.g,
+        camStamp:    cam.n,
+        camVer:      cam.b,
+        camMfgWiki:  cam.f,
+        camOsmType:  cam.p,
+        camOsmObjId: cam.q,
       },
     });
     
@@ -567,7 +860,7 @@ function _applyServerSnapshotCameras(cameras) {
     _ds.entities.add({
       position: Cesium.Cartesian3.fromDegrees(cam.o, cam.a, 0),
       billboard: {
-        image:                    ICONS[cam.t] ?? ICONS.i,
+        image:                    billboardImageForCamera(cam),
         verticalOrigin:           Cesium.VerticalOrigin.CENTER,
         horizontalOrigin:         Cesium.HorizontalOrigin.CENTER,
         scale:                    new Cesium.CallbackProperty(() => _selectedCameraId === camId ? 3.2 : 0, false),
@@ -682,11 +975,15 @@ export async function initCCTV(viewer) {
 
     // Close panel on any non-CCTV click
     if (!Cesium.defined(picked) || !picked.id) {
+      _selectedCameraId = null;
+      clearSelectionOverlay();
       if (_panel) _panel.style.display = 'none';
       return;
     }
     const props = picked.id?.properties;
     if (!props || props.type?.getValue() !== 'cctv') {
+      _selectedCameraId = null;
+      clearSelectionOverlay();
       if (_panel) _panel.style.display = 'none';
       return;
     }
@@ -704,6 +1001,16 @@ export async function initCCTV(viewer) {
       d: props.camDirect?.getValue(),    // sunders: direction
       k: props.camHeight?.getValue(),    // sunders: height
       m: props.camMfg?.getValue(),       // sunders: manufacturer
+      r: props.camMount?.getValue(),
+      e: props.camSurveil?.getValue(),
+      w: props.camSurvType?.getValue(),
+      j: props.camZone?.getValue(),
+      g: props.camAngle?.getValue(),
+      n: props.camStamp?.getValue(),
+      b: props.camVer?.getValue(),
+      f: props.camMfgWiki?.getValue(),
+      p: props.camOsmType?.getValue(),
+      q: props.camOsmObjId?.getValue(),
     });
   }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
 
@@ -728,6 +1035,8 @@ export async function initCCTV(viewer) {
           // Despawn all entities; tile cache stays for fast re-enable
           for (const k of [..._tileCache.keys()]) _despawnTile(k);
         }
+        _selectedCameraId = null;
+        clearSelectionOverlay();
         if (_panel) _panel.style.display = 'none';
       }
     },

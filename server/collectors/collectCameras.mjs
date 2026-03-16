@@ -266,6 +266,31 @@ function pickUrl(cameras) {
   return cameras;
 }
 
+function parseDirection(value) {
+  if (value == null) return null;
+  const raw = String(value).trim().toUpperCase();
+  if (!raw) return null;
+  const compass = {
+    N: 0,
+    NE: 45,
+    E: 90,
+    SE: 135,
+    S: 180,
+    SW: 225,
+    W: 270,
+    NW: 315,
+  };
+  if (raw in compass) return compass[raw];
+  const parsed = parseFloat(raw);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function parseNumber(value) {
+  if (value == null || value === '') return null;
+  const parsed = parseFloat(String(value));
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 /** Normalise a raw camera record to our schema */
 function normalise(raw, sourceName) {
   const lat = raw.lat ?? raw.latitude ?? null;
@@ -409,8 +434,10 @@ async function fetchOsmSurveillanceCameras() {
       if (byId.has(osmId)) continue;
       byId.add(osmId);
 
-      const direction = parseFloat(tags['camera:direction'] ?? tags.direction ?? '');
-      const height = parseFloat(tags.height ?? '');
+      const direction = parseDirection(tags['camera:direction'] ?? tags.direction);
+      const height = parseNumber(tags.height);
+      const angle = parseNumber(tags['camera:angle']);
+      const version = parseInt(String(el.version ?? ''), 10);
 
       cameras.push({
         id: `osm-${osmId}`,
@@ -429,6 +456,16 @@ async function fetchOsmSurveillanceCameras() {
         sundersDirection: Number.isFinite(direction) ? direction : null,
         sundersHeight: Number.isFinite(height) ? height : null,
         sundersManufacturer: manufacturer || null,
+        osmType: osmType,
+        osmObjectId: String(el.id),
+        osmMount: tags['camera:mount'] || null,
+        osmSurveillance: tags.surveillance || null,
+        osmSurveillanceType: tags['surveillance:type'] || null,
+        osmSurveillanceZone: tags['surveillance:zone'] || null,
+        osmCameraAngle: Number.isFinite(angle) ? angle : null,
+        osmTimestamp: tags.timestamp || null,
+        osmVersion: Number.isFinite(version) ? version : null,
+        osmManufacturerWikidata: tags['manufacturer:wikidata'] || null,
       });
       accepted++;
     }
@@ -505,7 +542,9 @@ async function main() {
   // ── Compact/lite output — only fields needed for tile rendering ────────────
   // Schema: id(i), lat(a), lon(o), imageUrl(u), videoUrl(x), feedType(t), source(s)
   // For hybrid (h): both u and x are populated. For image (i): only u. For video (v): only x.
-  // OSM metadata fields: type(y), operator(z), direction(d), height(k), manufacturer(m).
+  // OSM metadata fields: type(y), operator(z), direction(d), height(k), manufacturer(m),
+  // mount(r), surveillance(e), surveillance:type(w), zone(j), angle(g), timestamp(n),
+  // version(b), manufacturer:wikidata(f), OSM object type(p), OSM id(q).
   const lite = unique.map(c => {
     const feedTypeChar = c.feedType[0];  // 'i'=image, 'v'=video, 'h'=hybrid
     const obj = {
@@ -530,11 +569,21 @@ async function main() {
     }
 
     // OSM metadata enrichment fields
-    if (c.sundersType) obj.y = c.sundersType;           // camera:type from OSM
-    if (c.sundersOperator) obj.z = c.sundersOperator;   // operator name
-    if (c.sundersDirection) obj.d = c.sundersDirection; // direction in degrees
-    if (c.sundersHeight) obj.k = c.sundersHeight;       // height in meters
+    if (c.sundersType) obj.y = c.sundersType;                // camera:type from OSM
+    if (c.sundersOperator) obj.z = c.sundersOperator;        // operator name
+    if (c.sundersDirection != null) obj.d = c.sundersDirection; // direction in degrees
+    if (c.sundersHeight != null) obj.k = c.sundersHeight;    // height in meters
     if (c.sundersManufacturer) obj.m = c.sundersManufacturer; // manufacturer (Flock Safety, etc.)
+    if (c.osmMount) obj.r = c.osmMount;
+    if (c.osmSurveillance) obj.e = c.osmSurveillance;
+    if (c.osmSurveillanceType) obj.w = c.osmSurveillanceType;
+    if (c.osmSurveillanceZone) obj.j = c.osmSurveillanceZone;
+    if (c.osmCameraAngle != null) obj.g = c.osmCameraAngle;
+    if (c.osmTimestamp) obj.n = c.osmTimestamp;
+    if (c.osmVersion != null) obj.b = c.osmVersion;
+    if (c.osmManufacturerWikidata) obj.f = c.osmManufacturerWikidata;
+    if (c.osmType) obj.p = c.osmType;
+    if (c.osmObjectId) obj.q = c.osmObjectId;
 
     return obj;
   });
@@ -553,7 +602,7 @@ async function main() {
     n:  lite.length,
     d:  lite.map(c => [+c.a.toFixed(4), +c.o.toFixed(4), T_IDX[c.t] ?? 0]),
     // Count cameras with attached OSM metadata tags.
-    osmTagged: lite.filter(c => c.y || c.z || c.d || c.k || c.m).length,
+    osmTagged: lite.filter(c => c.y || c.z || c.d || c.k || c.m || c.w || c.e).length,
   };
   const globePath = path.join(OUT_DIR, 'cameras-globe.json');
   fs.writeFileSync(globePath, JSON.stringify(globe));
