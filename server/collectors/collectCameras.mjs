@@ -255,6 +255,9 @@ const SKIP_EXISTING = args['skip-existing'] === true;
 const MODE          = String(args.mode ?? 'osm').toLowerCase();
 const OSM_MANUFACTURER = args['osm-manufacturer'] === true ? 'Flock Safety' : (args['osm-manufacturer'] ? String(args['osm-manufacturer']) : 'Flock Safety');
 const OSM_INCLUDE_ALL_SURVEILLANCE = String(args['osm-all'] ?? 'false').toLowerCase() === 'true';
+const OSM_TIMEOUT_MS = parseInt(args['osm-timeout-ms'] ?? '90000', 10);
+const OSM_ENDPOINT_RETRIES = parseInt(args['osm-endpoint-retries'] ?? '2', 10);
+const OSM_MAX_SPLIT_DEPTH = parseInt(args['osm-max-split-depth'] ?? '2', 10);
 
 const sources = SUBSET
   ? SOURCES.filter(s => SUBSET.includes(s.source))
@@ -289,6 +292,66 @@ function parseNumber(value) {
   if (value == null || value === '') return null;
   const parsed = parseFloat(String(value));
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function isTimeoutError(err) {
+  const msg = String(err?.message ?? '').toLowerCase();
+  return err?.name === 'TimeoutError' || err?.name === 'AbortError' || msg.includes('aborted due to timeout');
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function splitRegionBox(region) {
+  const midLat = (region.minLat + region.maxLat) / 2;
+  const midLng = (region.minLng + region.maxLng) / 2;
+  return [
+    { minLat: region.minLat, minLng: region.minLng, maxLat: midLat, maxLng: midLng },
+    { minLat: region.minLat, minLng: midLng, maxLat: midLat, maxLng: region.maxLng },
+    { minLat: midLat, minLng: region.minLng, maxLat: region.maxLat, maxLng: midLng },
+    { minLat: midLat, minLng: midLng, maxLat: region.maxLat, maxLng: region.maxLng },
+  ];
+}
+
+function buildOverpassQuery(region, timeoutSec) {
+  return `[out:json][timeout:${timeoutSec}];(node["man_made"="surveillance"](${region.minLat},${region.minLng},${region.maxLat},${region.maxLng});way["man_made"="surveillance"](${region.minLat},${region.minLng},${region.maxLat},${region.maxLng});relation["man_made"="surveillance"](${region.minLat},${region.minLng},${region.maxLat},${region.maxLng}););out center tags;`;
+}
+
+async function fetchOverpassRegion(region, endpoints, timeoutMs, endpointRetries) {
+  const timeoutSec = Math.max(30, Math.ceil(timeoutMs / 1000));
+  const q = buildOverpassQuery(region, timeoutSec);
+  let lastError = null;
+
+  for (const endpoint of endpoints) {
+    for (let attempt = 1; attempt <= endpointRetries; attempt++) {
+      try {
+        const body = new URLSearchParams({ data: q });
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          body,
+          headers: {
+            'User-Agent': 'ShadowGrid-Collector/1.0',
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'Accept': 'application/json,text/plain,*/*',
+          },
+          signal: AbortSignal.timeout(timeoutMs),
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        if (!Array.isArray(data?.elements)) throw new Error('Invalid Overpass payload');
+        return data;
+      } catch (err) {
+        lastError = err;
+        if (attempt < endpointRetries) {
+          await sleep(250 * attempt);
+          continue;
+        }
+      }
+    }
+  }
+
+  throw lastError ?? new Error('No Overpass response');
 }
 
 /** Normalise a raw camera record to our schema */
@@ -383,43 +446,46 @@ async function fetchOsmSurveillanceCameras() {
   console.log(`\n  Fetching OSM surveillance objects from Overpass...`);
   console.log(`    Manufacturer filter: ${OSM_INCLUDE_ALL_SURVEILLANCE ? 'disabled (--osm-all=true)' : OSM_MANUFACTURER}`);
 
-  for (const region of regions) {
-    const q = `[out:json][timeout:60];(node["man_made"="surveillance"](${region.minLat},${region.minLng},${region.maxLat},${region.maxLng});way["man_made"="surveillance"](${region.minLat},${region.minLng},${region.maxLat},${region.maxLng});relation["man_made"="surveillance"](${region.minLat},${region.minLng},${region.maxLat},${region.maxLng}););out center tags;`;
+  for (const rootRegion of regions) {
+    const queue = [{ ...rootRegion, depth: 0, label: rootRegion.name }];
+    let regionFetched = 0;
+    let regionAccepted = 0;
+    let regionSplitCount = 0;
+    let regionFailedCount = 0;
 
-    let data = null;
-    let lastError = null;
+    while (queue.length) {
+      const region = queue.shift();
+      let data = null;
+      let lastError = null;
 
-    for (const endpoint of OVERPASS_ENDPOINTS) {
       try {
-        const body = new URLSearchParams({ data: q });
-        const res = await fetch(endpoint, {
-          method: 'POST',
-          body,
-          headers: {
-            'User-Agent': 'ShadowGrid-Collector/1.0',
-            'Content-Type': 'application/x-www-form-urlencoded',
-            'Accept': 'application/json,text/plain,*/*',
-          },
-          signal: AbortSignal.timeout(60_000),
-        });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        data = await res.json();
-        break;
+        data = await fetchOverpassRegion(region, OVERPASS_ENDPOINTS, OSM_TIMEOUT_MS, OSM_ENDPOINT_RETRIES);
       } catch (err) {
         lastError = err;
       }
-    }
 
-    if (!data || !Array.isArray(data.elements)) {
-      console.log(`      ${region.name}: ${lastError?.message || 'No Overpass response'}`);
-      continue;
-    }
+      if (!data || !Array.isArray(data.elements)) {
+        if (isTimeoutError(lastError) && region.depth < OSM_MAX_SPLIT_DEPTH) {
+          const parts = splitRegionBox(region).map((part, idx) => ({
+            ...part,
+            depth: region.depth + 1,
+            label: `${region.label}.${idx + 1}`,
+          }));
+          queue.push(...parts);
+          regionSplitCount += 1;
+          continue;
+        }
 
-    const elements = data.elements;
-    totalFetched += elements.length;
-    let accepted = 0;
+        regionFailedCount += 1;
+        console.log(`      ${region.label}: ${lastError?.message || 'No Overpass response'}`);
+        continue;
+      }
 
-    for (const el of elements) {
+      const elements = data.elements;
+      totalFetched += elements.length;
+      regionFetched += elements.length;
+
+      for (const el of elements) {
       const lat = Number(el.lat ?? el.center?.lat);
       const lng = Number(el.lon ?? el.center?.lon);
       if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
@@ -467,11 +533,17 @@ async function fetchOsmSurveillanceCameras() {
         osmVersion: Number.isFinite(version) ? version : null,
         osmManufacturerWikidata: tags['manufacturer:wikidata'] || null,
       });
-      accepted++;
+      regionAccepted++;
     }
 
-    console.log(`      ${region.name}: ${elements.length} fetched, ${accepted} accepted`);
-    await new Promise(r => setTimeout(r, 400));
+      await sleep(250);
+    }
+
+    let summary = `      ${rootRegion.name}: ${regionFetched} fetched, ${regionAccepted} accepted`;
+    if (regionSplitCount > 0) summary += `, split ${regionSplitCount}x`;
+    if (regionFailedCount > 0) summary += `, failed chunks ${regionFailedCount}`;
+    console.log(summary);
+    await sleep(300);
   }
 
   console.log(`    Total fetched: ${totalFetched}, Qualified: ${cameras.length} surveillance cameras`);
