@@ -387,14 +387,8 @@ function drawReticle(viewer) {
         <button id="hud-cam-reset-north" style="background:rgba(0,0,0,0.5);border:1px solid rgba(0,255,136,0.25);color:rgba(0,255,136,0.78);font-family:'Share Tech Mono', monospace;font-size:9px;letter-spacing:0.06em;padding:4px 6px;cursor:pointer;">NORTH</button>
         <button id="hud-cam-orbital" style="background:rgba(0,0,0,0.5);border:1px solid rgba(0,255,136,0.25);color:rgba(0,255,136,0.78);font-family:'Share Tech Mono', monospace;font-size:9px;letter-spacing:0.06em;padding:4px 6px;cursor:pointer;">LABELS</button>
         <button id="hud-cam-imagery-dropdown" style="position:relative;background:rgba(0,0,0,0.5);border:1px solid rgba(0,255,136,0.25);color:rgba(0,255,136,0.78);font-family:'Share Tech Mono', monospace;font-size:9px;letter-spacing:0.06em;padding:4px 6px;cursor:pointer;">IMAGERY ▾</button>
-        <button id="hud-cam-rotate" style="background:rgba(0,0,0,0.5);border:1px solid rgba(0,255,136,0.25);color:rgba(0,255,136,0.78);font-family:'Share Tech Mono', monospace;font-size:9px;letter-spacing:0.06em;padding:4px 6px;cursor:pointer;">ROTATE</button>
+          <button id="hud-cam-rotate" style="grid-column:1 / span 2;background:rgba(0,0,0,0.5);border:1px solid rgba(0,255,136,0.25);color:rgba(0,255,136,0.78);font-family:'Share Tech Mono', monospace;font-size:9px;letter-spacing:0.06em;padding:4px 6px;cursor:pointer;">ROTATE</button>
       </div>
-      <div id="hud-imagery-menu" style="display:none;position:absolute;bottom:52px;right:10px;background:rgba(4,10,18,0.95);border:1px solid rgba(0,255,136,0.28);border-right:2px solid rgba(0,255,136,0.7);backdrop-filter:blur(8px);z-index:11;min-width:140px;max-height:180px;overflow-y:auto;">
-        <button class="imagery-option" data-imagery="satellite" style="display:block;width:100%;text-align:left;padding:6px 10px;background:transparent;border:none;border-bottom:1px solid rgba(0,255,136,0.1);color:rgba(0,255,136,0.7);font-family:'Share Tech Mono',monospace;font-size:9px;letter-spacing:0.05em;cursor:pointer;">SATELLITE</button>
-        <button class="imagery-option" data-imagery="street" style="display:block;width:100%;text-align:left;padding:6px 10px;background:transparent;border:none;border-bottom:1px solid rgba(0,255,136,0.1);color:rgba(0,255,136,0.7);font-family:'Share Tech Mono',monospace;font-size:9px;letter-spacing:0.05em;cursor:pointer;">STREET</button>
-        <button class="imagery-option" data-imagery="hybrid" style="display:block;width:100%;text-align:left;padding:6px 10px;background:transparent;border:none;color:rgba(0,255,136,0.7);font-family:'Share Tech Mono',monospace;font-size:9px;letter-spacing:0.05em;cursor:pointer;">HYBRID</button>
-      </div>
-      <!-- Earth Engine Satellite Imagery Modal -->
       <div id="satellite-imagery-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);backdrop-filter:blur(4px);z-index:100;pointer-events:auto;">
         <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:90%;max-width:700px;background:rgba(4,10,18,0.96);border:2px solid rgba(0,255,136,0.35);border-right:3px solid rgba(0,255,136,0.7);padding:0;backdrop-filter:blur(10px);box-shadow:0 8px 32px rgba(0,0,0,0.6);">
           <!-- Header -->
@@ -587,6 +581,33 @@ function drawReticle(viewer) {
   `;
   document.body.appendChild(filtersDock);
 
+  const imageryDock = document.createElement('div');
+  imageryDock.id = 'hud-imagery';
+  imageryDock.style.cssText = `
+    position: fixed;
+    left: 0;
+    top: 0;
+    transform: translateX(-50%);
+    pointer-events: auto;
+    z-index: 10;
+  `;
+  imageryDock.innerHTML = `
+    <button id="hud-imagery-dropdown" style="
+      background: rgba(0,0,0,0.55);
+      border: 1px solid rgba(0,255,136,0.28);
+      color: rgba(0,255,136,0.8);
+      font-family: 'Share Tech Mono', 'Courier New', monospace;
+      font-size: 10px;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      padding: 3px 9px;
+      cursor: pointer;
+      border-radius: 2px;
+      backdrop-filter: blur(8px);
+    ">Imagery ▾</button>
+  `;
+  document.body.appendChild(imageryDock);
+
   function positionFiltersDock() {
     const statusRect = statusPanel.getBoundingClientRect();
     const cameraRect = zoomPanel.getBoundingClientRect();
@@ -608,8 +629,16 @@ function drawReticle(viewer) {
     layersDock.style.top = `${y}px`;
   }
 
+  function positionImageryDock() {
+    const layersRect = layersDock.getBoundingClientRect();
+    imageryDock.style.left = `${layersRect.right + 6}px`;
+    imageryDock.style.top = `${layersRect.top}px`;
+  }
+
   positionLayersDock();
   window.addEventListener('resize', positionLayersDock);
+  positionImageryDock();
+  window.addEventListener('resize', positionImageryDock);
 
   // ── Canvas render (reticle + corner brackets) ─────────────────────────────
   function renderCanvas() {
