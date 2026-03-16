@@ -17,6 +17,7 @@ const CAMERA_SNAPSHOT_URL = '/api/localproxy/api/cameras/snapshot';
 const SERVER_HEAVY_MODE = (import.meta.env.VITE_SERVER_HEAVY_MODE ?? 'false').toLowerCase() === 'true';
 const SERVER_SNAPSHOT_MAX_CAMERAS = Math.max(parseInt(import.meta.env.VITE_SERVER_CAMERA_MAX_OBJECTS ?? '3000', 10) || 3000, 100);
 const MAX_ALT_M     = 3_000_000;  // 3,000 km — individual tiles hidden above this
+const OSM_FOV_MAX_ALT_M = 12_000; // persistent OSM FOV cones only at close zoom
 const MAX_TILES     = 24;         // max cached & visible tiles (LRU)
 const THROTTLE_MS   = 400;        // min ms between viewport recalculations
 
@@ -59,7 +60,7 @@ let _loadingTiles = new Set();  // keys currently fetching
 let _panel        = null;       // DOM click-panel
 let _throttleId   = null;
 let _hlsInstance  = null;       // active hls.js instance — destroyed on panel close
-let _serverCamMap = new Map();  // id -> Cesium.Entity in server-heavy mode
+let _serverCamMap = new Map();  // id -> { entities: Cesium.Entity[] } in server-heavy mode
 let _globePoints  = null;       // Cesium.PointPrimitiveCollection — globe-altitude coverage
 let _globeReady   = false;      // cameras-globe.json loaded and points built
 let _selectedCameraId = null;   // currently highlighted camera for visual feedback
@@ -224,6 +225,18 @@ function billboardImageForCamera(cam) {
   return isOsmOnlyCamera(cam) ? getOsmIcon(cam) : (FEED_ICONS[cam.t] ?? FEED_ICONS.i);
 }
 
+function markerVerticalOrigin(_cam) {
+  return Cesium.VerticalOrigin.BOTTOM;
+}
+
+function markerHeightReference(_cam) {
+  return Cesium.HeightReference.CLAMP_TO_GROUND;
+}
+
+function markerPixelOffset(cam) {
+  return isOsmOnlyCamera(cam) ? new Cesium.Cartesian2(0, 0) : new Cesium.Cartesian2(0, -2);
+}
+
 function labelTextForCamera(cam) {
   if (_selectedCameraId !== cam.i) return '';
   if (isOsmOnlyCamera(cam)) {
@@ -258,6 +271,15 @@ function clearSelectionOverlay() {
     _ds?.entities.remove(entity);
   }
   _selectionOverlayEntities = [];
+}
+
+function shouldRenderOsmFov(cam) {
+  if (!_enabled || !_viewer || !isOsmOnlyCamera(cam)) return false;
+  if (_viewer.camera.positionCartographic.height > OSM_FOV_MAX_ALT_M) return false;
+  const kind = normalizeOsmKind(cam);
+  if (kind === 'guard') return false;
+  if (kind !== 'dome' && !Number.isFinite(Number(cam.d))) return false;
+  return true;
 }
 
 function estimateFovRangeMeters(cam) {
@@ -351,6 +373,69 @@ function renderSelectionOverlay(cam) {
       },
     }));
   }
+}
+
+function createPersistentFovEntities(cam) {
+  if (!isOsmOnlyCamera(cam) || !_ds) return [];
+  const kind = normalizeOsmKind(cam);
+  if (kind === 'guard') return [];
+
+  const palette = getOsmPalette(cam);
+  const fillColor = Cesium.Color.fromCssColorString(palette.fill).withAlpha(0.09);
+  const edgeColor = Cesium.Color.fromCssColorString(palette.stroke).withAlpha(0.42);
+  const rangeM = estimateFovRangeMeters(cam);
+  const spreadDeg = estimateFovSpreadDegrees(cam);
+  const lat = Number(cam.a);
+  const lon = Number(cam.o);
+  const show = new Cesium.CallbackProperty(() => shouldRenderOsmFov(cam), false);
+  const entities = [];
+
+  if (spreadDeg >= 360) {
+    entities.push(_ds.entities.add({
+      show,
+      position: Cesium.Cartesian3.fromDegrees(lon, lat, 0),
+      ellipse: {
+        semiMajorAxis: rangeM,
+        semiMinorAxis: rangeM,
+        material: fillColor,
+        outline: true,
+        outlineColor: edgeColor,
+        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+      },
+    }));
+    return entities;
+  }
+
+  const hierarchy = buildSectorPositions(cam, rangeM, spreadDeg);
+  entities.push(_ds.entities.add({
+    show,
+    polygon: {
+      hierarchy,
+      material: fillColor,
+      outline: true,
+      outlineColor: edgeColor,
+      perPositionHeight: false,
+      heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+    },
+  }));
+
+  if (cam.d != null) {
+    const tip = destinationPoint(lat, lon, Number(cam.d), rangeM);
+    entities.push(_ds.entities.add({
+      show,
+      polyline: {
+        positions: [
+          Cesium.Cartesian3.fromDegrees(lon, lat, 0),
+          Cesium.Cartesian3.fromDegrees(tip.lon, tip.lat, 0),
+        ],
+        width: 1.5,
+        clampToGround: true,
+        material: edgeColor,
+      },
+    }));
+  }
+
+  return entities;
 }
 
 function fieldRow(label, value, accentColor, href = null) {
@@ -653,12 +738,15 @@ async function _spawnEntities(key) {
     const cam = cameras[i];
     
     // Create main camera icon with dynamic scaling and color tinting
+    const entityBundle = [];
     const e = _ds.entities.add({
       position: Cesium.Cartesian3.fromDegrees(cam.o, cam.a, 0),
       billboard: {
         image:                    billboardImageForCamera(cam),
-        verticalOrigin:           Cesium.VerticalOrigin.CENTER,
+        verticalOrigin:           markerVerticalOrigin(cam),
         horizontalOrigin:         Cesium.HorizontalOrigin.CENTER,
+        heightReference:          markerHeightReference(cam),
+        pixelOffset:              markerPixelOffset(cam),
         scale:                    new Cesium.CallbackProperty(() => _selectedCameraId === cam.i ? 2.0 : 1.25, false),
         color:                    new Cesium.CallbackProperty(() => _selectedCameraId === cam.i ? Cesium.Color.YELLOW : Cesium.Color.WHITE, false),
         disableDepthTestDistance: Number.POSITIVE_INFINITY,
@@ -672,7 +760,7 @@ async function _spawnEntities(key) {
         style:            Cesium.LabelStyle.FILL_AND_OUTLINE,
         horizontalOrigin: Cesium.HorizontalOrigin.CENTER,
         verticalOrigin:   Cesium.VerticalOrigin.TOP,
-        pixelOffset:      new Cesium.Cartesian2(0, 15),
+        pixelOffset:      new Cesium.Cartesian2(0, 10),
       },
       properties: {
         type:        'cctv',
@@ -700,21 +788,27 @@ async function _spawnEntities(key) {
         camOsmObjId: cam.q,
       },
     });
+    entityBundle.push(e);
     
     // Create a larger, semi-transparent glow behind the main icon
-    _ds.entities.add({
+    const glow = _ds.entities.add({
       position: Cesium.Cartesian3.fromDegrees(cam.o, cam.a, 0),
       billboard: {
         image:                    billboardImageForCamera(cam),
-        verticalOrigin:           Cesium.VerticalOrigin.CENTER,
+        verticalOrigin:           markerVerticalOrigin(cam),
         horizontalOrigin:         Cesium.HorizontalOrigin.CENTER,
+        heightReference:          markerHeightReference(cam),
+        pixelOffset:              markerPixelOffset(cam),
         scale:                    new Cesium.CallbackProperty(() => _selectedCameraId === cam.i ? 3.2 : 0, false),
         color:                    new Cesium.CallbackProperty(() => _selectedCameraId === cam.i ? Cesium.Color.fromCssColorString('#ffff0044') : Cesium.Color.TRANSPARENT, false),
         disableDepthTestDistance: Number.POSITIVE_INFINITY,
       },
     });
+    entityBundle.push(glow);
+
+    entityBundle.push(...createPersistentFovEntities(cam));
     
-    tile.entities.push(e);
+    tile.entities.push(...entityBundle);
   }
 }
 
@@ -808,12 +902,15 @@ function _applyServerSnapshotCameras(cameras) {
     const existing = _serverCamMap.get(camId);
     if (existing) continue;
 
+    const entityBundle = [];
     const entity = _ds.entities.add({
       position: Cesium.Cartesian3.fromDegrees(cam.o, cam.a, 0),
       billboard: {
         image:                    billboardImageForCamera(cam),
-        verticalOrigin:           Cesium.VerticalOrigin.CENTER,
+        verticalOrigin:           markerVerticalOrigin(cam),
         horizontalOrigin:         Cesium.HorizontalOrigin.CENTER,
+        heightReference:          markerHeightReference(cam),
+        pixelOffset:              markerPixelOffset(cam),
         scale:                    new Cesium.CallbackProperty(() => _selectedCameraId === camId ? 2.0 : 1.25, false),
         color:                    new Cesium.CallbackProperty(() => _selectedCameraId === camId ? Cesium.Color.YELLOW : Cesium.Color.WHITE, false),
         disableDepthTestDistance: Number.POSITIVE_INFINITY,
@@ -827,7 +924,7 @@ function _applyServerSnapshotCameras(cameras) {
         style:            Cesium.LabelStyle.FILL_AND_OUTLINE,
         horizontalOrigin: Cesium.HorizontalOrigin.CENTER,
         verticalOrigin:   Cesium.VerticalOrigin.TOP,
-        pixelOffset:      new Cesium.Cartesian2(0, 15),
+        pixelOffset:      new Cesium.Cartesian2(0, 10),
       },
       properties: {
         type:        'cctv',
@@ -855,26 +952,31 @@ function _applyServerSnapshotCameras(cameras) {
         camOsmObjId: cam.q,
       },
     });
+    entityBundle.push(entity);
     
     // Create a larger, semi-transparent glow behind the main icon
-    _ds.entities.add({
+    const glow = _ds.entities.add({
       position: Cesium.Cartesian3.fromDegrees(cam.o, cam.a, 0),
       billboard: {
         image:                    billboardImageForCamera(cam),
-        verticalOrigin:           Cesium.VerticalOrigin.CENTER,
+        verticalOrigin:           markerVerticalOrigin(cam),
         horizontalOrigin:         Cesium.HorizontalOrigin.CENTER,
+        heightReference:          markerHeightReference(cam),
+        pixelOffset:              markerPixelOffset(cam),
         scale:                    new Cesium.CallbackProperty(() => _selectedCameraId === camId ? 3.2 : 0, false),
         color:                    new Cesium.CallbackProperty(() => _selectedCameraId === camId ? Cesium.Color.fromCssColorString('#ffff0044') : Cesium.Color.TRANSPARENT, false),
         disableDepthTestDistance: Number.POSITIVE_INFINITY,
       },
     });
+    entityBundle.push(glow);
+    entityBundle.push(...createPersistentFovEntities(cam));
     
-    _serverCamMap.set(camId, entity);
+    _serverCamMap.set(camId, { entities: entityBundle });
   }
 
-  for (const [camId, entity] of _serverCamMap.entries()) {
+  for (const [camId, bundle] of _serverCamMap.entries()) {
     if (!seen.has(camId)) {
-      _ds.entities.remove(entity);
+      for (const entity of bundle.entities) _ds.entities.remove(entity);
       _serverCamMap.delete(camId);
     }
   }
