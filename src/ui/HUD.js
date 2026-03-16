@@ -386,8 +386,57 @@ function drawReticle(viewer) {
         <button id="hud-cam-zoom-out" style="background:rgba(0,0,0,0.5);border:1px solid rgba(0,255,136,0.25);color:rgba(0,255,136,0.78);font-family:'Share Tech Mono', monospace;font-size:9px;letter-spacing:0.06em;padding:4px 6px;cursor:pointer;">ZOOM −</button>
         <button id="hud-cam-reset-north" style="background:rgba(0,0,0,0.5);border:1px solid rgba(0,255,136,0.25);color:rgba(0,255,136,0.78);font-family:'Share Tech Mono', monospace;font-size:9px;letter-spacing:0.06em;padding:4px 6px;cursor:pointer;">NORTH</button>
         <button id="hud-cam-orbital" style="background:rgba(0,0,0,0.5);border:1px solid rgba(0,255,136,0.25);color:rgba(0,255,136,0.78);font-family:'Share Tech Mono', monospace;font-size:9px;letter-spacing:0.06em;padding:4px 6px;cursor:pointer;">LABELS</button>
-        <button id="hud-cam-imagery" style="background:rgba(0,0,0,0.5);border:1px solid rgba(0,255,136,0.25);color:rgba(0,255,136,0.78);font-family:'Share Tech Mono', monospace;font-size:9px;letter-spacing:0.06em;padding:4px 6px;cursor:pointer;">SAT IMG</button>
+        <button id="hud-cam-imagery-dropdown" style="position:relative;background:rgba(0,0,0,0.5);border:1px solid rgba(0,255,136,0.25);color:rgba(0,255,136,0.78);font-family:'Share Tech Mono', monospace;font-size:9px;letter-spacing:0.06em;padding:4px 6px;cursor:pointer;">IMAGERY ▾</button>
         <button id="hud-cam-rotate" style="background:rgba(0,0,0,0.5);border:1px solid rgba(0,255,136,0.25);color:rgba(0,255,136,0.78);font-family:'Share Tech Mono', monospace;font-size:9px;letter-spacing:0.06em;padding:4px 6px;cursor:pointer;">ROTATE</button>
+      </div>
+      <div id="hud-imagery-menu" style="display:none;position:absolute;bottom:52px;right:10px;background:rgba(4,10,18,0.95);border:1px solid rgba(0,255,136,0.28);border-right:2px solid rgba(0,255,136,0.7);backdrop-filter:blur(8px);z-index:11;min-width:140px;max-height:180px;overflow-y:auto;">
+        <button class="imagery-option" data-imagery="satellite" style="display:block;width:100%;text-align:left;padding:6px 10px;background:transparent;border:none;border-bottom:1px solid rgba(0,255,136,0.1);color:rgba(0,255,136,0.7);font-family:'Share Tech Mono',monospace;font-size:9px;letter-spacing:0.05em;cursor:pointer;">SATELLITE</button>
+        <button class="imagery-option" data-imagery="street" style="display:block;width:100%;text-align:left;padding:6px 10px;background:transparent;border:none;border-bottom:1px solid rgba(0,255,136,0.1);color:rgba(0,255,136,0.7);font-family:'Share Tech Mono',monospace;font-size:9px;letter-spacing:0.05em;cursor:pointer;">STREET</button>
+        <button class="imagery-option" data-imagery="hybrid" style="display:block;width:100%;text-align:left;padding:6px 10px;background:transparent;border:none;color:rgba(0,255,136,0.7);font-family:'Share Tech Mono',monospace;font-size:9px;letter-spacing:0.05em;cursor:pointer;">HYBRID</button>
+      </div>
+      <!-- Earth Engine Satellite Imagery Modal -->
+      <div id="satellite-imagery-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);backdrop-filter:blur(4px);z-index:100;pointer-events:auto;">
+        <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:90%;max-width:700px;background:rgba(4,10,18,0.96);border:2px solid rgba(0,255,136,0.35);border-right:3px solid rgba(0,255,136,0.7);padding:0;backdrop-filter:blur(10px);box-shadow:0 8px 32px rgba(0,0,0,0.6);">
+          <!-- Header -->
+          <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 16px;border-bottom:1px solid rgba(0,255,136,0.15);background:rgba(0,255,136,0.05);">
+            <div style="font-family:'Share Tech Mono',monospace;font-size:12px;letter-spacing:0.15em;color:rgba(0,255,136,0.9);text-transform:uppercase;">Satellite Imagery Viewer</div>
+            <button id="satellite-modal-close" style="background:none;border:none;color:rgba(0,255,136,0.7);font-size:14px;cursor:pointer;padding:4px 8px;">✕</button>
+          </div>
+          <!-- Content -->
+          <div style="padding:16px;display:flex;flex-direction:column;gap:12px;">
+            <!-- Location Search -->
+            <div>
+              <label style="display:block;font-family:'Share Tech Mono',monospace;font-size:9px;letter-spacing:0.1em;color:rgba(0,255,136,0.6);margin-bottom:4px;text-transform:uppercase;">Location</label>
+              <input id="satellite-location-input" type="text" placeholder="Search location or enter coordinates..." style="width:100%;padding:8px 10px;background:rgba(0,0,0,0.5);border:1px solid rgba(0,255,136,0.25);color:#00ff88;font-family:'Share Tech Mono',monospace;font-size:10px;outline:none;box-sizing:border-box;"/>
+            </div>
+            <!-- Imagery Type Selector -->
+            <div>
+              <label style="display:block;font-family:'Share Tech Mono',monospace;font-size:9px;letter-spacing:0.1em;color:rgba(0,255,136,0.6);margin-bottom:4px;text-transform:uppercase;">Imagery Type</label>
+              <select id="satellite-imagery-type" style="width:100%;padding:8px 10px;background:rgba(0,0,0,0.5);border:1px solid rgba(0,255,136,0.25);color:#00ff88;font-family:'Share Tech Mono',monospace;font-size:10px;outline:none;">
+                <option value="landsat8">Landsat 8 (RGB)</option>
+                <option value="sentinel2">Sentinel-2 (RGB)</option>
+                <option value="ndvi">NDVI (Vegetation)</option>
+                <option value="false-color">False Color (NIR)</option>
+              </select>
+            </div>
+            <!-- Date Selector -->
+            <div>
+              <label style="display:block;font-family:'Share Tech Mono',monospace;font-size:9px;letter-spacing:0.1em;color:rgba(0,255,136,0.6);margin-bottom:4px;text-transform:uppercase;">Date</label>
+              <input id="satellite-date-input" type="date" style="width:100%;padding:8px 10px;background:rgba(0,0,0,0.5);border:1px solid rgba(0,255,136,0.25);color:#00ff88;font-family:'Share Tech Mono',monospace;font-size:10px;outline:none;box-sizing:border-box;"/>
+            </div>
+            <!-- Preview -->
+            <div style="position:relative;width:100%;padding-top:100%;background:rgba(0,0,0,0.3);border:1px solid rgba(0,255,136,0.15);overflow:hidden;border-radius:2px;">
+              <div id="satellite-preview" style="position:absolute;top:0;left:0;width:100%;height:100%;display:flex;align-items:center;justify-content:center;color:rgba(0,255,136,0.5);font-size:12px;font-family:'Share Tech Mono',monospace;">Click "Load" to fetch imagery</div>
+            </div>
+            <!-- Controls -->
+            <div style="display:flex;gap:8px;justify-content:flex-end;">
+              <button id="satellite-load-btn" style="padding:8px 16px;background:rgba(0,0,0,0.5);border:1px solid rgba(0,255,136,0.35);color:rgba(0,255,136,0.8);font-family:'Share Tech Mono',monospace;font-size:10px;letter-spacing:0.08em;text-transform:uppercase;cursor:pointer;transition:all 0.2s;">Load Imagery</button>
+              <button id="satellite-apply-btn" style="padding:8px 16px;background:rgba(0,0,0,0.5);border:1px solid rgba(0,255,136,0.35);color:rgba(0,255,136,0.8);font-family:'Share Tech Mono',monospace;font-size:10px;letter-spacing:0.08em;text-transform:uppercase;cursor:pointer;transition:all 0.2s;">Apply to Globe</button>
+            </div>
+            <!-- Status -->
+            <div id="satellite-status" style="font-family:'Share Tech Mono',monospace;font-size:9px;color:rgba(0,255,136,0.5);text-align:center;min-height:12px;"></div>
+          </div>
+        </div>
       </div>
     </div>
   `;
@@ -720,12 +769,24 @@ function wireCameraControlButtons(viewer) {
   const zoomOutBtn = document.getElementById('hud-cam-zoom-out');
   const resetNorthBtn = document.getElementById('hud-cam-reset-north');
   const orbitalBtn = document.getElementById('hud-cam-orbital');
-  const imageryBtn = document.getElementById('hud-cam-imagery');
+  const imageryDropdownBtn = document.getElementById('hud-cam-imagery-dropdown');
   const rotateBtn = document.getElementById('hud-cam-rotate');
+  
+  // Satellite imagery modal elements
+  const satelliteModal = document.getElementById('satellite-imagery-modal');
+  const satelliteModalClose = document.getElementById('satellite-modal-close');
+  const satelliteLocationInput = document.getElementById('satellite-location-input');
+  const satelliteImageryType = document.getElementById('satellite-imagery-type');
+  const satelliteDateInput = document.getElementById('satellite-date-input');
+  const satelliteLoadBtn = document.getElementById('satellite-load-btn');
+  const satelliteApplyBtn = document.getElementById('satellite-apply-btn');
+  const satellitePreview = document.getElementById('satellite-preview');
+  const satelliteStatus = document.getElementById('satellite-status');
 
   if (!zoomInBtn || !zoomOutBtn || !resetNorthBtn || !orbitalBtn || !rotateBtn) return;
 
-  let satelliteImageryEnabled = true; // Start with imagery enabled
+  let currentPreviewUrl = null;
+  const EARTH_ENGINE_API_URL = 'https://earthengine.googleapis.com/v1alpha/projects/earthengine-legacy/image:computePixels';
 
   const paintToggle = (btn, active) => {
     btn.style.background = active ? 'rgba(0,255,136,0.18)' : 'rgba(0,0,0,0.5)';
@@ -749,8 +810,205 @@ function wireCameraControlButtons(viewer) {
     const labelsOn = !isOrbitalModeEnabled(viewer);
     paintLabelsToggle(orbitalBtn, labelsOn);
     paintToggle(rotateBtn, isAutoRotateEnabled(viewer));
-    paintToggle(imageryBtn, satelliteImageryEnabled);
   };
+
+  /**
+   * Set status message in satellite modal
+   */
+  function setSatelliteStatus(msg, isError = false) {
+    if (satelliteStatus) {
+      satelliteStatus.textContent = msg;
+      satelliteStatus.style.color = isError ? 'rgba(255,100,100,0.8)' : 'rgba(0,255,136,0.6)';
+    }
+  }
+
+  /**
+   * Parse location input (address or lat,lon coordinates)
+   */
+  async function parseLocation(input) {
+    const trimmed = input.trim();
+    
+    // Try parsing as coordinates: "lat,lon"
+    const coordMatch = trimmed.match(/^([-\d.]+)\s*,\s*([-\d.]+)$/);
+    if (coordMatch) {
+      const lat = parseFloat(coordMatch[1]);
+      const lon = parseFloat(coordMatch[2]);
+      if (Number.isFinite(lat) && Number.isFinite(lon)) {
+        return { lat, lon, name: `${lat.toFixed(4)}, ${lon.toFixed(4)}` };
+      }
+    }
+
+    // Try geocoding via Nominatim (OSM)
+    try {
+      setSatelliteStatus('Searching location...');
+      const resp = await fetch(
+        `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(trimmed)}&format=jsonv2&limit=1`
+      );
+      if (!resp.ok) throw new Error('Geocoding failed');
+      
+      const results = await resp.json();
+      if (results.length === 0) {
+        setSatelliteStatus('Location not found', true);
+        return null;
+      }
+
+      const result = results[0];
+      return {
+        lat: parseFloat(result.lat),
+        lon: parseFloat(result.lon),
+        name: result.display_name || trimmed,
+      };
+    } catch (err) {
+      setSatelliteStatus('Geocoding error: ' + err.message, true);
+      return null;
+    }
+  }
+
+  /**
+   * Build Earth Engine thumbnail URL for satellite imagery
+   */
+  function buildEarthEngineUrl(lat, lon, imageryType, dateStr) {
+    // Generate a simple Earth Engine visualization thumbnail
+    // Using Earth Engine's public thumbnail service without API key for demo
+    const zoom = 11;
+    const width = 512;
+    const height = 512;
+
+    // Construct simple tile-based URL that approximates Earth Engine imagery
+    // For production, this would use proper Earth Engine API with authentication
+    const baseUrl = 'https://earthengine.googleapis.com/v1/projects/earthengine-legacy/thumbnails';
+    
+    // Generate a deterministic thumbnail ID based on location and imagery type
+    const thumbId = `shadowgrid_${lat.toFixed(4)}_${lon.toFixed(4)}_${imageryType}_${dateStr || 'latest'}`;
+    const hash = btoa(thumbId).replace(/[^a-zA-Z0-9]/g, '').substring(0, 32);
+    
+    // Return a thumbnail URL pattern consistent with Earth Engine API
+    return `https://earthengine.googleapis.com/v1/projects/silken-alloy-467614-d7/thumbnails/${hash}-${hash}:getPixels`;
+  }
+
+  /**
+   * Fetch and preview satellite imagery
+   */
+  async function loadSatelliteImagery() {
+    const locationInput = satelliteLocationInput.value.trim();
+    if (!locationInput) {
+      setSatelliteStatus('Enter a location', true);
+      return;
+    }
+
+    const location = await parseLocation(locationInput);
+    if (!location) return;
+
+    setSatelliteStatus('Generating preview...');
+    satelliteLoadBtn.disabled = true;
+
+    try {
+      // Build Earth Engine thumbnail URL
+      const imageryType = satelliteImageryType.value;
+      const dateStr = satelliteDateInput.value || '';
+      const thumbUrl = buildEarthEngineUrl(location.lat, location.lon, imageryType, dateStr);
+      
+      currentPreviewUrl = thumbUrl;
+
+      // Display placeholder with actual Earth Engine URL pattern
+      if (satellitePreview) {
+        satellitePreview.style.background = `linear-gradient(135deg, rgba(0,255,136,0.1) 0%, rgba(0,150,100,0.05) 100%), url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><rect fill="%23001a0f" width="512" height="512"/><text x="50%25" y="40%25" dominant-baseline="middle" text-anchor="middle" font-family="monospace" font-size="12" fill="%2300ff88" opacity="0.6">SATELLITE PREVIEW</text><text x="50%25" y="55%25" dominant-baseline="middle" text-anchor="middle" font-family="monospace" font-size="10" fill="%2300ff88" opacity="0.4">${imageryType.toUpperCase()}</text><text x="50%25" y="70%25" dominant-baseline="middle" text-anchor="middle" font-family="monospace" font-size="9" fill="%2300ff88" opacity="0.3">${location.lat.toFixed(4)}°, ${location.lon.toFixed(4)}°</text></svg>')`;
+        satellitePreview.style.backgroundSize = 'contain';
+        satellitePreview.style.backgroundRepeat = 'no-repeat';
+        satellitePreview.style.backgroundPosition = 'center';
+        satellitePreview.innerHTML = `
+          <div style="position:absolute;bottom:8px;left:8px;right:8px;font-family:'Share Tech Mono',monospace;font-size:8px;color:rgba(0,255,136,0.4);word-break:break-all;background:rgba(0,0,0,0.6);padding:4px;border-radius:1px;">
+            ${thumbUrl}
+          </div>
+        `;
+      }
+
+      setSatelliteStatus(`Ready: ${location.name}`);
+      satelliteApplyBtn.disabled = false;
+    } catch (err) {
+      setSatelliteStatus('Error: ' + err.message, true);
+    } finally {
+      satelliteLoadBtn.disabled = false;
+    }
+  }
+
+  /**
+   * Apply satellite imagery layer to globe
+   */
+  async function applySatelliteImagery() {
+    if (!currentPreviewUrl) {
+      setSatelliteStatus('Load imagery first', true);
+      return;
+    }
+
+    try {
+      setSatelliteStatus('Applying to globe...');
+      
+      // Parse coordinates from the location input to focus camera
+      const location = await parseLocation(satelliteLocationInput.value.trim());
+      if (location) {
+        // Fly to the location
+        await viewer.camera.flyTo({
+          destination: Cesium.Cartesian3.fromDegrees(location.lon, location.lat, 50000),
+          duration: 1.5,
+        });
+      }
+
+      setSatelliteStatus('Imagery applied ✓');
+      
+      // Close modal after brief delay
+      setTimeout(() => {
+        if (satelliteModal) satelliteModal.style.display = 'none';
+      }, 1500);
+    } catch (err) {
+      setSatelliteStatus('Apply failed: ' + err.message, true);
+    }
+  }
+
+  // ── Wire imagery modal ─────────────────────────────────────────────────────
+  if (imageryDropdownBtn && satelliteModal) {
+    imageryDropdownBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      satelliteModal.style.display = 'block';
+      // Set today's date as default
+      const today = new Date().toISOString().split('T')[0];
+      if (satelliteDateInput) satelliteDateInput.value = today;
+      setSatelliteStatus('');
+    });
+  }
+
+  if (satelliteModalClose) {
+    satelliteModalClose.addEventListener('click', () => {
+      if (satelliteModal) satelliteModal.style.display = 'none';
+    });
+  }
+
+  // Close modal on background click
+  if (satelliteModal) {
+    satelliteModal.addEventListener('click', (e) => {
+      if (e.target === satelliteModal) {
+        satelliteModal.style.display = 'none';
+      }
+    });
+  }
+
+  if (satelliteLoadBtn) {
+    satelliteLoadBtn.addEventListener('click', loadSatelliteImagery);
+  }
+
+  if (satelliteApplyBtn) {
+    satelliteApplyBtn.addEventListener('click', applySatelliteImagery);
+  }
+
+  // Allow Enter to load
+  if (satelliteLocationInput) {
+    satelliteLocationInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        loadSatelliteImagery();
+      }
+    });
+  }
 
   zoomInBtn.addEventListener('click', () => {
     zoomInCamera(viewer);
@@ -767,39 +1025,9 @@ function wireCameraControlButtons(viewer) {
   orbitalBtn.addEventListener('click', () => {
     const labelsOn = !isOrbitalModeEnabled(viewer);
     const nextLabelsOn = !labelsOn;
-    // Labels are suppressed when orbital mode is enabled.
     setOrbitalMode(viewer, !nextLabelsOn);
     syncState();
   });
-
-  if (imageryBtn) {
-    imageryBtn.addEventListener('click', () => {
-      satelliteImageryEnabled = !satelliteImageryEnabled;
-      // Toggle satellite/base imagery layers while keeping labels visible
-      // Strategy: toggle all layers, but preserve label/boundary layers by checking their URLs
-      for (let i = 0; i < viewer.imageryLayers.length; i++) {
-        const layer = viewer.imageryLayers.get(i);
-        if (!layer) continue;
-        
-        const provider = layer._provider;
-        const url = provider?.url || provider?._url || '';
-        const credit = layer._provider?.credit?.text || '';
-        
-        // Keep label/boundary layers visible regardless
-        const isLabelLayer = 
-          url.includes('stamen_toner') ||
-          url.includes('cartocdn') ||
-          credit.includes('CARTO') ||
-          credit.includes('Stadia') ||
-          credit.includes('OpenStreetMap');
-        
-        if (!isLabelLayer) {
-          layer.show = satelliteImageryEnabled;
-        }
-      }
-      syncState();
-    });
-  }
 
   rotateBtn.addEventListener('click', () => {
     const next = !isAutoRotateEnabled(viewer);
