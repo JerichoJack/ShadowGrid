@@ -325,18 +325,76 @@ async function fetchSource(s, idx, total) {
   }
 }
 
-/** Run an array of async tasks with max concurrency */
-async function pool(tasks, concurrency) {
-  const results = [];
-  let i = 0;
-  async function worker() {
-    while (i < tasks.length) {
-      const idx = i++;
-      results[idx] = await tasks[idx]();
+/** Fetch and enrich cameras with sunders.uber.space OSM surveillance data */
+async function enrichWithSunders(cameras) {
+  const SUNDERS_API = 'https://sunders.uber.space/camera.php';
+  const MATCH_RADIUS = 0.01; // ~1km at equator
+  let enrichedCount = 0;
+
+  try {
+    console.log(`\n  Enriching with sunders.uber.space OSM data...`);
+    
+    // Build geographic bounds from cameras
+    const lats = cameras.map(c => c.lat);
+    const lngs = cameras.map(c => c.lng);
+    const minLat = Math.min(...lats);
+    const maxLat = Math.max(...lats);
+    const minLng = Math.min(...lngs);
+    const maxLng = Math.max(...lngs);
+    
+    // Fetch sunders data for all bounds
+    const params = new URLSearchParams({
+      bbox: `${minLng},${minLat},${maxLng},${maxLat}`,
+      format: 'json',
+    });
+    const sunUrl = `${SUNDERS_API}?${params}`;
+    console.log(`    Fetching from ${SUNDERS_API} for bounds...`);
+    
+    const res = await fetch(sunUrl, { 
+      signal: AbortSignal.timeout(60_000),
+      headers: { 'User-Agent': 'ShadowGrid-Collector/1.0' },
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    
+    const sunders = await res.json();
+    if (!Array.isArray(sunders)) throw new Error('Unexpected response format (expected array)');
+    console.log(`    Retrieved ${sunders.length} OSM surveillance nodes`);
+    
+    // Match cameras to sunders nodes by proximity
+    for (const cam of cameras) {
+      for (const sun of sunders) {
+        const sunLat = parseFloat(sun.lat);
+        const sunLng = parseFloat(sun.lon);
+        if (!isFinite(sunLat) || !isFinite(sunLng)) continue;
+        
+        const latDist = Math.abs(cam.lat - sunLat);
+        const lngDist = Math.abs(cam.lng - sunLng);
+        
+        // Simple proximity check (could be improved with great-circle distance)
+        if (latDist + lngDist < MATCH_RADIUS) {
+          // Matched — populate sunders fields
+          if (sun.tags?.camera_type) {
+            cam.sundersType = sun.tags.camera_type;
+          }
+          if (sun.tags?.operator) {
+            cam.sundersOperator = sun.tags.operator;
+          }
+          if (sun.tags?.camera_direction) {
+            cam.sundersDirection = parseFloat(sun.tags.camera_direction);
+          }
+          if (sun.tags?.height) {
+            cam.sundersHeight = parseFloat(sun.tags.height);
+          }
+          enrichedCount++;
+          break; // Use first match, move to next camera
+        }
+      }
     }
+    console.log(`    Enriched ${enrichedCount} cameras with OSM metadata`);
+  } catch (err) {
+    console.warn(`    Sunders enrichment failed (optional): ${err.message}`);
+    // Non-fatal — continue without sunders data
   }
-  await Promise.all(Array.from({ length: concurrency }, worker));
-  return results;
 }
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
@@ -363,6 +421,9 @@ async function main() {
     return true;
   });
   console.log(`  Unique cameras: ${unique.length}`);
+
+  // ── Enrich with sunders OSM surveillance data ───────────────────────────────
+  await enrichWithSunders(unique);
 
   // ── Full output ────────────────────────────────────────────────────────────
   const fullPath = path.join(OUT_DIR, 'cameras.json');

@@ -273,13 +273,16 @@ async function _spawnEntities(key) {
     if (i > 0 && i % 50 === 0) await new Promise(r => setTimeout(r, 0));
     if (!_enabled || !_tileCache.has(key)) break; // disabled/evicted mid-spawn
     const cam = cameras[i];
+    
+    // Create main camera icon with dynamic scaling and color tinting
     const e = _ds.entities.add({
       position: Cesium.Cartesian3.fromDegrees(cam.o, cam.a, 0),
       billboard: {
         image:                    ICONS[cam.t] ?? ICONS.i,
         verticalOrigin:           Cesium.VerticalOrigin.CENTER,
         horizontalOrigin:         Cesium.HorizontalOrigin.CENTER,
-        scale:                    new Cesium.CallbackProperty(() => _selectedCameraId === cam.i ? 1.6 : 1.25, false),
+        scale:                    new Cesium.CallbackProperty(() => _selectedCameraId === cam.i ? 2.0 : 1.25, false),
+        color:                    new Cesium.CallbackProperty(() => _selectedCameraId === cam.i ? Cesium.Color.YELLOW : Cesium.Color.WHITE, false),
         disableDepthTestDistance: Number.POSITIVE_INFINITY,
       },
       label: {
@@ -304,6 +307,20 @@ async function _spawnEntities(key) {
         camSource:   cam.s,
       },
     });
+    
+    // Create a larger, semi-transparent glow behind the main icon
+    _ds.entities.add({
+      position: Cesium.Cartesian3.fromDegrees(cam.o, cam.a, 0),
+      billboard: {
+        image:                    ICONS[cam.t] ?? ICONS.i,
+        verticalOrigin:           Cesium.VerticalOrigin.CENTER,
+        horizontalOrigin:         Cesium.HorizontalOrigin.CENTER,
+        scale:                    new Cesium.CallbackProperty(() => _selectedCameraId === cam.i ? 3.2 : 0, false),
+        color:                    new Cesium.CallbackProperty(() => _selectedCameraId === cam.i ? Cesium.Color.fromCssColorString('#ffff0044') : Cesium.Color.TRANSPARENT, false),
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+      },
+    });
+    
     tile.entities.push(e);
   }
 }
@@ -404,7 +421,8 @@ function _applyServerSnapshotCameras(cameras) {
         image:                    ICONS[cam.t] ?? ICONS.i,
         verticalOrigin:           Cesium.VerticalOrigin.CENTER,
         horizontalOrigin:         Cesium.HorizontalOrigin.CENTER,
-        scale:                    new Cesium.CallbackProperty(() => _selectedCameraId === camId ? 1.6 : 1.25, false),
+        scale:                    new Cesium.CallbackProperty(() => _selectedCameraId === camId ? 2.0 : 1.25, false),
+        color:                    new Cesium.CallbackProperty(() => _selectedCameraId === camId ? Cesium.Color.YELLOW : Cesium.Color.WHITE, false),
         disableDepthTestDistance: Number.POSITIVE_INFINITY,
       },
       label: {
@@ -429,6 +447,20 @@ function _applyServerSnapshotCameras(cameras) {
         camSource:   cam.s,
       },
     });
+    
+    // Create a larger, semi-transparent glow behind the main icon
+    _ds.entities.add({
+      position: Cesium.Cartesian3.fromDegrees(cam.o, cam.a, 0),
+      billboard: {
+        image:                    ICONS[cam.t] ?? ICONS.i,
+        verticalOrigin:           Cesium.VerticalOrigin.CENTER,
+        horizontalOrigin:         Cesium.HorizontalOrigin.CENTER,
+        scale:                    new Cesium.CallbackProperty(() => _selectedCameraId === camId ? 3.2 : 0, false),
+        color:                    new Cesium.CallbackProperty(() => _selectedCameraId === camId ? Cesium.Color.fromCssColorString('#ffff0044') : Cesium.Color.TRANSPARENT, false),
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+      },
+    });
+    
     _serverCamMap.set(camId, entity);
   }
 
