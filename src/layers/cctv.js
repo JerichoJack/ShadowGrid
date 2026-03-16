@@ -75,6 +75,7 @@ function freshUrl(url) {
 /** Classify a videoUrl into 'hls' | 'mp4' | 'other' */
 function videoKind(url) {
   if (!url) return 'other';
+  if (/^(rtmp|rtsp|mms):/i.test(url)) return 'unsupported';
   if (/\.m3u8(\?|$)/i.test(url)) return 'hls';
   if (/\.mp4(\?|$)/i.test(url))  return 'mp4';
   return 'other';
@@ -126,9 +127,13 @@ function renderPanel(cam) {
     // For video (v): only cam.x is set; for image (i): only cam.u is set
     // For hybrid (h): both cam.u (image) and cam.x (video) are set
     // For sunders-only (source='sunders'): no URLs, show OSM metadata instead
-    const hasVideo  = cam.t === 'v' || cam.t === 'h';
-    const hasImage  = cam.t === 'i' || cam.t === 'h';
-    const videoUrl  = hasVideo ? (cam.x || cam.u) : null;     // prefer cam.x for video
+    const hasVideoFlag = cam.t === 'v' || cam.t === 'h';
+    const hasImageFlag = cam.t === 'i' || cam.t === 'h';
+    const rawVideoUrl  = hasVideoFlag ? (cam.x || cam.u) : null;     // prefer cam.x for video
+    const kind         = videoKind(rawVideoUrl);
+    const hasPlayableVideo = hasVideoFlag && rawVideoUrl && kind !== 'unsupported';
+    const videoUrl  = hasPlayableVideo ? rawVideoUrl : null;
+    const hasImage  = hasImageFlag || !hasPlayableVideo;
     const imageUrl  = hasImage ? freshUrl(cam.u || cam.x) : null;  // fallback to video if no image
     
     // Log debug info for hybrid cameras to troubleshoot STREAM UNAVAILABLE
@@ -137,7 +142,6 @@ function renderPanel(cam) {
     }
     
     const isSundersOnly = !videoUrl && !imageUrl;
-    const kind      = videoKind(videoUrl);
     const typeLabel = isSundersOnly ? 'OSM LOCATION' : cam.t === 'v' ? 'LIVE VIDEO' : cam.t === 'h' ? 'HYBRID' : 'SNAPSHOT';
     const typeCol   = isSundersOnly ? '#ff9900' : cam.t === 'v' ? '#00aaff'   : cam.t === 'h' ? '#cc88ff' : '#00ff88';
 
@@ -164,21 +168,21 @@ function renderPanel(cam) {
             ${cam.m ? `<div>Manufacturer: <span style="color:rgba(255,153,0,1)">${cam.m}</span></div>` : ''}
             <div style="margin-top:6px;color:rgba(255,153,0,0.6);font-size:8px">No live feed available · Location source: OpenStreetMap</div>
           </div>
-        ` : hasVideo ? `
+        ` : hasPlayableVideo ? `
           <div style="background:#000;position:relative;overflow:hidden;border:1px solid rgba(0,170,255,0.25)">
             <video id="cctv-video"
               autoplay muted playsinline controls
               style="width:100%;max-height:220px;display:block;background:#000">
             </video>
             <div id="cctv-video-err" style="display:none;color:rgba(255,100,100,0.8);font-size:10px;padding:16px;text-align:center;flex-direction:column;align-items:center;gap:6px">
-              ⚠ VIDEO STREAM ${!videoUrl ? 'NOT AVAILABLE' : 'BLOCKED  (auth/CORS)'}
+              ⚠ VIDEO STREAM ${!videoUrl ? 'NOT AVAILABLE' : 'BLOCKED (auth/CORS/upstream)'}
               ${videoUrl ? `<span style="font-size:9px;color:rgba(255,100,100,0.6)">Showing latest snapshot below...</span>` : ''}
-              <a href="${videoUrl || cam.u}" target="_blank" rel="noopener noreferrer"
+              <a href="${videoUrl || cam.x || cam.u}" target="_blank" rel="noopener noreferrer"
                  style="color:rgba(0,170,255,0.7);font-size:9px;text-decoration:underline">${videoUrl ? 'Try direct link' : 'No video link'} ↗</a>
             </div>
           </div>
           <div style="margin-top:5px;display:flex;justify-content:flex-end">
-            <a href="${videoUrl}" target="_blank" rel="noopener noreferrer"
+            <a href="${videoUrl || cam.x || cam.u}" target="_blank" rel="noopener noreferrer"
                style="color:rgba(0,170,255,0.45);font-size:9px;text-decoration:none;letter-spacing:0.05em">⬡ open in browser ↗</a>
           </div>
         ` : `
@@ -207,7 +211,7 @@ function renderPanel(cam) {
       _panel.style.display = 'none';
     });
 
-    if (hasVideo) {
+    if (hasPlayableVideo) {
       const videoEl = document.getElementById('cctv-video');
       const errEl   = document.getElementById('cctv-video-err');
 

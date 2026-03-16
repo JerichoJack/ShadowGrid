@@ -331,6 +331,9 @@ async function enrichWithSunders(cameras) {
   const SUNDERS_API = 'https://sunders.uber.space/camera.php';
   const MATCH_RADIUS = 0.01;  // ~1km at equator, in degrees
   const GRID_SIZE = 10;       // 10°×10° spatial grid cells to avoid O(n*m) explosion
+  const SUNDERS_ZOOM = 14;
+  const SUNDERS_WIDTH = 1400;
+  const SUNDERS_HEIGHT = 900;
   let enrichedCount = 0;
 
   try {
@@ -364,7 +367,9 @@ async function enrichWithSunders(cameras) {
         // Fetch sunders data for this grid cell only
         const params = new URLSearchParams({
           bbox: `${bounds.minLng},${bounds.minLat},${bounds.maxLng},${bounds.maxLat}`,
-          format: 'json',
+          zoom: String(SUNDERS_ZOOM),
+          width: String(SUNDERS_WIDTH),
+          height: String(SUNDERS_HEIGHT),
         });
         const sunUrl = `${SUNDERS_API}?${params}`;
         
@@ -384,10 +389,41 @@ async function enrichWithSunders(cameras) {
           if (!Array.isArray(nodes)) nodes = [];
         }
         if (nodes.length === 0) continue;
+
+        // Expand clustered entries so we can proximity-match against individual points.
+        const expanded = [];
+        for (const n of nodes) {
+          const base = {
+            lat: n.lat,
+            lon: n.lon,
+            id: n.id,
+            tags: {
+              'camera:type': n['camera:type'] ?? n.camera_type ?? null,
+              operator: n.operator ?? null,
+              'camera:direction': n['camera:direction'] ?? n.camera_direction ?? n.direction ?? null,
+              height: n.height ?? null,
+              manufacturer: n.manufacturer ?? null,
+              man_made: n.man_made ?? null,
+            },
+          };
+          if (base.lat != null && base.lon != null) expanded.push(base);
+          if (Array.isArray(n.poly)) {
+            for (const p of n.poly) {
+              expanded.push({
+                lat: p.lat,
+                lon: p.lon,
+                id: p.id,
+                tags: base.tags,
+              });
+            }
+          }
+        }
+
+        if (expanded.length === 0) continue;
         
         // Match cameras in this cell to sunders nodes in this cell
         for (const cam of cellCameras) {
-          for (const sun of nodes) {
+          for (const sun of expanded) {
             const sunLat = parseFloat(sun.lat);
             const sunLng = parseFloat(sun.lon);
             if (!isFinite(sunLat) || !isFinite(sunLng)) continue;
@@ -397,9 +433,9 @@ async function enrichWithSunders(cameras) {
             
             if (latDist + lngDist < MATCH_RADIUS) {
               // Matched — populate sunders fields
-              if (sun.tags?.camera_type) cam.sundersType = sun.tags.camera_type;
+              if (sun.tags?.['camera:type']) cam.sundersType = sun.tags['camera:type'];
               if (sun.tags?.operator) cam.sundersOperator = sun.tags.operator;
-              if (sun.tags?.camera_direction) cam.sundersDirection = parseFloat(sun.tags.camera_direction);
+              if (sun.tags?.['camera:direction']) cam.sundersDirection = parseFloat(sun.tags['camera:direction']);
               if (sun.tags?.height) cam.sundersHeight = parseFloat(sun.tags.height);
               enrichedCount++;
               break;  // Use first match, move to next camera
@@ -426,6 +462,9 @@ async function enrichWithSunders(cameras) {
 /** Fetch sunders-only cameras (not in trafficvision feeds) and add as new sources */
 async function fetchSundersOnlyCameras() {
   const SUNDERS_API = 'https://sunders.uber.space/camera.php';
+  const SUNDERS_ZOOM = 14;
+  const SUNDERS_WIDTH = 1400;
+  const SUNDERS_HEIGHT = 900;
   let sundersOnlyCount = 0;
 
   try {
@@ -449,7 +488,9 @@ async function fetchSundersOnlyCameras() {
       regionCount++;
       const params = new URLSearchParams({
         bbox: `${region.minLng},${region.minLat},${region.maxLng},${region.maxLat}`,
-        format: 'json',
+        zoom: String(SUNDERS_ZOOM),
+        width: String(SUNDERS_WIDTH),
+        height: String(SUNDERS_HEIGHT),
       });
       const sunUrl = `${SUNDERS_API}?${params}`;
       
@@ -480,13 +521,43 @@ async function fetchSundersOnlyCameras() {
           continue;
         }
         
-        totalFetched += nodes.length;
-        console.log(`      ${region.name}: ${nodes.length} nodes fetched`);
+        // Expand clustered entries so poly children can be included as real points.
+        const expanded = [];
+        for (const n of nodes) {
+          const base = {
+            id: n.id,
+            lat: n.lat,
+            lon: n.lon,
+            tags: {
+              man_made: n.man_made ?? null,
+              manufacturer: n.manufacturer ?? null,
+              'camera:type': n['camera:type'] ?? n.camera_type ?? null,
+              operator: n.operator ?? null,
+              'camera:direction': n['camera:direction'] ?? n.camera_direction ?? n.direction ?? null,
+              height: n.height ?? null,
+              name: n.name ?? null,
+              'surveillance:type': n['surveillance:type'] ?? null,
+            },
+          };
+          if (base.lat != null && base.lon != null) expanded.push(base);
+          if (Array.isArray(n.poly)) {
+            for (const p of n.poly) {
+              expanded.push({
+                id: p.id,
+                lat: p.lat,
+                lon: p.lon,
+                tags: base.tags,
+              });
+            }
+          }
+        }
+
+        totalFetched += expanded.length;
+        console.log(`      ${region.name}: ${expanded.length} points fetched`);
         
         // Filter for surveillance cameras - be lenient with filtering
-        for (const sun of nodes) {
-          if (!sun.tags) continue;
-          const tags = sun.tags;
+        for (const sun of expanded) {
+          const tags = sun.tags || {};
           
           // Include if: 
           // - has man_made=surveillance tag, OR
@@ -511,9 +582,9 @@ async function fetchSundersOnlyCameras() {
               state: '',
               city: '',
               // Store OSM tags directly
-              sundersType: tags.camera_type || tags['camera:type'] || null,
+              sundersType: tags['camera:type'] || null,
               sundersOperator: tags.operator || null,
-              sundersDirection: tags.camera_direction || tags['camera:direction'] ? parseFloat(tags.camera_direction || tags['camera:direction']) : null,
+              sundersDirection: tags['camera:direction'] ? parseFloat(tags['camera:direction']) : null,
               sundersHeight: tags.height ? parseFloat(tags.height) : null,
               sundersManufacturer: tags.manufacturer || null,
             };
