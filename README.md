@@ -188,6 +188,23 @@ Set `VITE_TRAFFIC_PROVIDER` to one of:
 
 ---
 
+### 🛰️ Satellite Imagery Viewer
+
+The HUD Imagery panel now pulls preview imagery through the local proxy route `/api/localproxy/api/satellite-imagery/preview`.
+
+- NASA GIBS works without credentials and is the default live source.
+- Sentinel Hub is optional and server-side only. Add these to `.env` if you want the Imagery panel to use it:
+
+```env
+SENTINEL_HUB_INSTANCE_ID=your_instance_id_here
+SENTINEL_HUB_TRUE_COLOR_LAYER=TRUE_COLOR
+SENTINEL_HUB_FALSE_COLOR_LAYER=FALSE_COLOR
+```
+
+- If Sentinel Hub is not configured or a remote request fails, the viewer falls back to NASA GIBS and then to the current globe basemap.
+
+---
+
 ## 🚀 Getting Started
 
 ### Prerequisites

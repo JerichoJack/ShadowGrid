@@ -65,6 +65,9 @@ const OPENSKY_CLIENT_SECRET = process.env.VITE_OPENSKY_CLIENT_SECRET || DOTENV_V
 const SPACETRACK_USER = process.env.VITE_SPACETRACK_USERNAME || DOTENV_VARS.get('VITE_SPACETRACK_USERNAME') || '';
 const SPACETRACK_PASS = process.env.VITE_SPACETRACK_PASSWORD || DOTENV_VARS.get('VITE_SPACETRACK_PASSWORD') || '';
 const N2YO_KEY = process.env.VITE_N2YO_API_KEY || DOTENV_VARS.get('VITE_N2YO_API_KEY') || '';
+const SENTINEL_HUB_INSTANCE_ID = process.env.SENTINEL_HUB_INSTANCE_ID || process.env.VITE_SENTINEL_HUB_INSTANCE_ID || DOTENV_VARS.get('SENTINEL_HUB_INSTANCE_ID') || DOTENV_VARS.get('VITE_SENTINEL_HUB_INSTANCE_ID') || '';
+const SENTINEL_HUB_TRUE_COLOR_LAYER = process.env.SENTINEL_HUB_TRUE_COLOR_LAYER || process.env.VITE_SENTINEL_HUB_TRUE_COLOR_LAYER || DOTENV_VARS.get('SENTINEL_HUB_TRUE_COLOR_LAYER') || DOTENV_VARS.get('VITE_SENTINEL_HUB_TRUE_COLOR_LAYER') || 'TRUE_COLOR';
+const SENTINEL_HUB_FALSE_COLOR_LAYER = process.env.SENTINEL_HUB_FALSE_COLOR_LAYER || process.env.VITE_SENTINEL_HUB_FALSE_COLOR_LAYER || DOTENV_VARS.get('SENTINEL_HUB_FALSE_COLOR_LAYER') || DOTENV_VARS.get('VITE_SENTINEL_HUB_FALSE_COLOR_LAYER') || SENTINEL_HUB_TRUE_COLOR_LAYER;
 const SATELLITE_MAX_PER_CATEGORY = Math.max(parseInt(process.env.VITE_SATELLITE_MAX_PER_CATEGORY || DOTENV_VARS.get('VITE_SATELLITE_MAX_PER_CATEGORY') || DOTENV_VARS.get('VITE_SATELLITE_MAX_OBJECTS') || '500', 10) || 500, 1);
 
 // ── Satellite snapshot cache (server-side propagation mode) ─────────────────
@@ -102,6 +105,11 @@ const TILE_CACHE_TTL_MS = 12 * 60 * 60_000;
 const TILE_CACHE_STALE_MS = 7 * 24 * 60 * 60_000;
 const CAMERA_STREAM_IDLE_MS = 2 * 60_000;
 const CAMERA_STREAM_BOOT_TIMEOUT_MS = 8_000;
+const NASA_GIBS_WMS_URL = 'https://gibs.earthdata.nasa.gov/wms/epsg4326/best/wms.cgi';
+const SENTINEL_HUB_WMS_URL = SENTINEL_HUB_INSTANCE_ID
+  ? `https://services.sentinel-hub.com/ogc/wms/${SENTINEL_HUB_INSTANCE_ID}`
+  : '';
+const SATELLITE_PREVIEW_IMAGE_SIZE = 768;
 let satCatalogTs = 0;
 /** @type {Array<{id:string,name:string,line1:string,line2:string,satrec:any,meta:any,category:string}>} */
 let satCatalog = [];
@@ -164,6 +172,167 @@ function ensureCameraStreamDir() {
 
 function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(max, value));
+}
+
+function normalizeIsoDate(value) {
+  const fallback = new Date().toISOString().slice(0, 10);
+  if (!value) return fallback;
+  const parsed = new Date(String(value));
+  if (!Number.isFinite(parsed.getTime())) return fallback;
+  return parsed.toISOString().slice(0, 10);
+}
+
+function computeImageryRectangle(lat, lon, radiusKm = 80) {
+  const safeLat = clamp(Number(lat) || 0, -85, 85);
+  const safeLon = ((((Number(lon) || 0) + 180) % 360) + 360) % 360 - 180;
+  const latDelta = radiusKm / 111;
+  const cosLat = Math.max(Math.cos((safeLat * Math.PI) / 180), 0.2);
+  const lonDelta = radiusKm / (111 * cosLat);
+  return {
+    west: clamp(safeLon - lonDelta, -180, 180),
+    south: clamp(safeLat - latDelta, -85, 85),
+    east: clamp(safeLon + lonDelta, -180, 180),
+    north: clamp(safeLat + latDelta, -85, 85),
+  };
+}
+
+function getImageryIntent(collectionId, bands) {
+  const collection = String(collectionId || '').toUpperCase();
+  const normalizedBands = String(bands || '').toUpperCase().replace(/\s+/g, '');
+  const falseColor = normalizedBands.includes('B8') || normalizedBands.includes('B11') || normalizedBands.includes('SR_B5');
+  const prefersSentinelHub = collection.includes('COPERNICUS') || collection.includes('S2');
+  const prefersLandsat = collection.includes('LANDSAT') || collection.includes('LC08') || collection.includes('LC09');
+  return { falseColor, prefersSentinelHub, prefersLandsat };
+}
+
+function pickSatelliteSourceOrder(source, collectionId, bands) {
+  const requested = String(source || 'auto').toLowerCase();
+  const intent = getImageryIntent(collectionId, bands);
+  if (requested === 'nasa-gibs') return ['nasa-gibs', 'basemap'];
+  if (requested === 'sentinel-hub') return ['sentinel-hub', 'nasa-gibs', 'basemap'];
+  if (requested === 'basemap') return ['basemap'];
+  if (intent.prefersSentinelHub && SENTINEL_HUB_WMS_URL) {
+    return ['sentinel-hub', 'nasa-gibs', 'basemap'];
+  }
+  if (intent.prefersLandsat && SENTINEL_HUB_WMS_URL) {
+    return ['sentinel-hub', 'nasa-gibs', 'basemap'];
+  }
+  return ['nasa-gibs', 'sentinel-hub', 'basemap'];
+}
+
+function buildWmsPreviewUrl(baseUrl, { layer, rectangle, date, format = 'image/jpeg', width = SATELLITE_PREVIEW_IMAGE_SIZE, height = SATELLITE_PREVIEW_IMAGE_SIZE }) {
+  const url = new URL(baseUrl);
+  url.searchParams.set('SERVICE', 'WMS');
+  url.searchParams.set('REQUEST', 'GetMap');
+  url.searchParams.set('VERSION', '1.3.0');
+  url.searchParams.set('LAYERS', layer);
+  url.searchParams.set('STYLES', '');
+  url.searchParams.set('FORMAT', format);
+  url.searchParams.set('TRANSPARENT', 'false');
+  url.searchParams.set('WIDTH', String(width));
+  url.searchParams.set('HEIGHT', String(height));
+  url.searchParams.set('CRS', 'EPSG:4326');
+  url.searchParams.set('BBOX', `${rectangle.south},${rectangle.west},${rectangle.north},${rectangle.east}`);
+  if (date) {
+    url.searchParams.set('TIME', date);
+  }
+  return url.toString();
+}
+
+async function verifyPreviewUrl(url) {
+  const resp = await fetch(url, {
+    headers: HEADERS,
+    signal: AbortSignal.timeout(8_000),
+  });
+  if (!resp.ok) {
+    throw new Error(`preview fetch ${resp.status}`);
+  }
+  await resp.arrayBuffer();
+}
+
+async function buildNasaGibsPreview({ lat, lon, date, collectionId, bands }) {
+  const rectangle = computeImageryRectangle(lat, lon, 120);
+  const isoDate = normalizeIsoDate(date);
+  const { falseColor } = getImageryIntent(collectionId, bands);
+  const layer = falseColor
+    ? 'MODIS_Terra_CorrectedReflectance_Bands367'
+    : 'MODIS_Terra_CorrectedReflectance_TrueColor';
+  const previewUrl = buildWmsPreviewUrl(NASA_GIBS_WMS_URL, { layer, rectangle, date: isoDate });
+  await verifyPreviewUrl(previewUrl);
+  return {
+    provider: 'nasa-gibs',
+    providerLabel: 'NASA GIBS',
+    previewUrl,
+    rectangle,
+    date: isoDate,
+    note: falseColor
+      ? 'NASA GIBS MODIS false-color composite.'
+      : 'NASA GIBS MODIS true-color daily composite.',
+    bandNote: falseColor
+      ? 'Requested false-color bands mapped to MODIS Bands 3-6-7.'
+      : 'Requested bands mapped to NASA GIBS true-color imagery.',
+  };
+}
+
+async function buildSentinelHubPreview({ lat, lon, date, collectionId, bands }) {
+  if (!SENTINEL_HUB_WMS_URL) {
+    throw new Error('Sentinel Hub is not configured on the server');
+  }
+  const rectangle = computeImageryRectangle(lat, lon, 60);
+  const isoDate = normalizeIsoDate(date);
+  const { falseColor } = getImageryIntent(collectionId, bands);
+  const layer = falseColor ? SENTINEL_HUB_FALSE_COLOR_LAYER : SENTINEL_HUB_TRUE_COLOR_LAYER;
+  const previewUrl = buildWmsPreviewUrl(SENTINEL_HUB_WMS_URL, { layer, rectangle, date: `${isoDate}/${isoDate}` });
+  await verifyPreviewUrl(previewUrl);
+  return {
+    provider: 'sentinel-hub',
+    providerLabel: 'Sentinel Hub',
+    previewUrl,
+    rectangle,
+    date: isoDate,
+    note: `Sentinel Hub WMS layer ${layer}.`,
+    bandNote: falseColor
+      ? 'Sentinel Hub false-color layer requested.'
+      : 'Sentinel Hub true-color layer requested.',
+  };
+}
+
+async function resolveSatelliteImageryPreview({ lat, lon, date, source, collectionId, bands }) {
+  const order = pickSatelliteSourceOrder(source, collectionId, bands);
+  const failures = [];
+  for (const candidate of order) {
+    try {
+      if (candidate === 'nasa-gibs') {
+        const payload = await buildNasaGibsPreview({ lat, lon, date, collectionId, bands });
+        return { ...payload, requestedSource: String(source || 'auto').toLowerCase(), fallbackCount: failures.length, failures };
+      }
+      if (candidate === 'sentinel-hub') {
+        const payload = await buildSentinelHubPreview({ lat, lon, date, collectionId, bands });
+        return { ...payload, requestedSource: String(source || 'auto').toLowerCase(), fallbackCount: failures.length, failures };
+      }
+      if (candidate === 'basemap') {
+        return {
+          provider: 'basemap',
+          providerLabel: 'Globe Basemap',
+          requestedSource: String(source || 'auto').toLowerCase(),
+          previewUrl: null,
+          rectangle: computeImageryRectangle(lat, lon, 90),
+          date: normalizeIsoDate(date),
+          note: 'Fell back to the existing globe basemap because no remote imagery provider responded.',
+          bandNote: 'Basemap fallback does not use the Collection/Bands inputs.',
+          fallbackCount: failures.length,
+          failures,
+        };
+      }
+    } catch (err) {
+      failures.push({ provider: candidate, message: err?.message ?? `${candidate} failed` });
+    }
+  }
+  throw new Error(failures.map(item => `${item.provider}: ${item.message}`).join(' | ') || 'No satellite imagery providers available');
 }
 
 function guessMimeByName(name) {
@@ -2444,6 +2613,33 @@ const server = http.createServer(async (req, res) => {
     } catch (err) {
       res.writeHead(502);
       res.end(JSON.stringify({ error: err?.message ?? 'traffic request failed' }));
+    }
+  } else if (url === '/api/satellite-imagery/preview') {
+    const lat = Number(query.lat);
+    const lon = Number(query.lon);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+      res.writeHead(400);
+      res.end(JSON.stringify({ error: 'lat and lon are required numeric query params' }));
+      return;
+    }
+    try {
+      const payload = await resolveSatelliteImageryPreview({
+        lat,
+        lon,
+        date: String(query.date ?? ''),
+        source: String(query.source ?? 'auto'),
+        collectionId: String(query.collection ?? ''),
+        bands: String(query.bands ?? ''),
+      });
+      res.writeHead(200);
+      res.end(JSON.stringify({
+        ...payload,
+        location: { lat, lon },
+        sentinelHubConfigured: Boolean(SENTINEL_HUB_WMS_URL),
+      }));
+    } catch (err) {
+      res.writeHead(502);
+      res.end(JSON.stringify({ error: err?.message ?? 'satellite imagery preview failed' }));
     }
   } else if (url === '/api/satellites/snapshot') {
     const rawMax = parseInt(query.max ?? '0', 10);

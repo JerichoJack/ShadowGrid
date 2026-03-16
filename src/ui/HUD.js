@@ -602,6 +602,16 @@ function drawReticle(viewer) {
           </div>
         </div>
         <div>
+          <label style="display:block;font-family:'Share Tech Mono',monospace;font-size:9px;letter-spacing:0.1em;color:rgba(0,255,136,0.6);margin-bottom:4px;text-transform:uppercase;">Source</label>
+          <select id="satellite-source-input" style="width:100%;padding:8px 10px;background:rgba(0,0,0,0.5);border:1px solid rgba(0,255,136,0.25);color:#00ff88;font-family:'Share Tech Mono',monospace;font-size:10px;outline:none;">
+            <option value="auto">Auto: NASA GIBS → Sentinel Hub → Basemap</option>
+            <option value="nasa-gibs">NASA GIBS</option>
+            <option value="sentinel-hub">Sentinel Hub</option>
+            <option value="basemap">Basemap only</option>
+          </select>
+          <div style="margin-top:4px;font-family:'Share Tech Mono',monospace;font-size:8px;color:rgba(0,255,136,0.45);letter-spacing:0.05em;">Sentinel Hub is used only if the server has credentials configured.</div>
+        </div>
+        <div>
           <label style="display:block;font-family:'Share Tech Mono',monospace;font-size:9px;letter-spacing:0.1em;color:rgba(0,255,136,0.6);margin-bottom:4px;text-transform:uppercase;">Collection</label>
           <select id="satellite-collection-input" style="width:100%;padding:8px 10px;background:rgba(0,0,0,0.5);border:1px solid rgba(0,255,136,0.25);color:#00ff88;font-family:'Share Tech Mono',monospace;font-size:10px;outline:none;">
             <option value="COPERNICUS/S2_SR_HARMONIZED|B4,B3,B2">Sentinel-2 SR Harmonized</option>
@@ -836,6 +846,7 @@ function wireCameraControlButtons(viewer) {
   const satelliteLocationInput = document.getElementById('satellite-location-input');
   const satellitePickBtn = document.getElementById('satellite-pick-btn');
   const satellitePickHint = document.getElementById('satellite-pick-hint');
+  const satelliteSourceInput = document.getElementById('satellite-source-input');
   const satelliteCollectionInput = document.getElementById('satellite-collection-input');
   const satelliteBandsInput = document.getElementById('satellite-bands-input');
   const satelliteDateInput = document.getElementById('satellite-date-input');
@@ -847,6 +858,8 @@ function wireCameraControlButtons(viewer) {
   if (!zoomInBtn || !zoomOutBtn || !resetNorthBtn || !orbitalBtn || !rotateBtn) return;
 
   let currentPreviewUrl = null;
+  let currentPreviewMeta = null;
+  let satelliteImageryLayer = null;
   let satellitePickArmed = false;
   const satellitePickHandler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
 
@@ -966,13 +979,57 @@ function wireCameraControlButtons(viewer) {
     }
   }
 
-  /**
-   * Build Earth Engine thumbnail URL for satellite imagery
-   */
-  function buildEarthEngineConfigNote(collectionId, bands, dateStr) {
-    const parts = [collectionId, `bands=${bands}`];
-    if (dateStr) parts.push(`date=${dateStr}`);
-    return parts.join(' | ');
+  function escapeHtml(value) {
+    return String(value ?? '')
+      .replaceAll('&', '&amp;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;')
+      .replaceAll('"', '&quot;')
+      .replaceAll("'", '&#39;');
+  }
+
+  function formatFailureText(failures) {
+    if (!Array.isArray(failures) || failures.length === 0) return '';
+    return failures
+      .map((failure) => `${failure.provider}: ${failure.message}`)
+      .join(' | ');
+  }
+
+  function renderSatellitePreview(payload, locationName) {
+    if (!satellitePreview) return;
+    const note = escapeHtml(payload.note || '');
+    const bandNote = escapeHtml(payload.bandNote || '');
+    const provider = escapeHtml(payload.providerLabel || payload.provider || 'Imagery');
+    const locationLabel = escapeHtml(locationName || `${payload.location?.lat?.toFixed?.(4) ?? ''}, ${payload.location?.lon?.toFixed?.(4) ?? ''}`);
+    const fallbackText = escapeHtml(formatFailureText(payload.failures));
+
+    if (payload.previewUrl) {
+      satellitePreview.innerHTML = `
+        <img src="${escapeHtml(payload.previewUrl)}" alt="Satellite preview" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;" />
+        <div style="position:absolute;inset:auto 8px 8px 8px;font-family:'Share Tech Mono',monospace;font-size:8px;color:rgba(230,255,245,0.82);word-break:break-word;background:rgba(0,0,0,0.62);padding:6px;border-radius:2px;line-height:1.55;">
+          <div style="color:#ffffff;opacity:0.92;">${provider}</div>
+          <div>${note}</div>
+          <div>${bandNote}</div>
+          <div>${locationLabel}</div>
+          ${fallbackText ? `<div style="color:rgba(255,186,120,0.92);">Fallbacks: ${fallbackText}</div>` : ''}
+        </div>
+      `;
+      return;
+    }
+
+    satellitePreview.style.background = `linear-gradient(135deg, rgba(0,255,136,0.1) 0%, rgba(0,150,100,0.05) 100%), url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><rect fill="%23001a0f" width="512" height="512"/><text x="50%25" y="38%25" dominant-baseline="middle" text-anchor="middle" font-family="monospace" font-size="12" fill="%2300ff88" opacity="0.6">BASEMAP FALLBACK</text><text x="50%25" y="58%25" dominant-baseline="middle" text-anchor="middle" font-family="monospace" font-size="9" fill="%2300ff88" opacity="0.4">${escapeHtml(provider)}</text></svg>')`;
+    satellitePreview.style.backgroundSize = 'cover';
+    satellitePreview.style.backgroundRepeat = 'no-repeat';
+    satellitePreview.style.backgroundPosition = 'center';
+    satellitePreview.innerHTML = `
+      <div style="position:absolute;inset:auto 8px 8px 8px;font-family:'Share Tech Mono',monospace;font-size:8px;color:rgba(230,255,245,0.82);word-break:break-word;background:rgba(0,0,0,0.62);padding:6px;border-radius:2px;line-height:1.55;">
+        <div style="color:#ffffff;opacity:0.92;">${provider}</div>
+        <div>${note}</div>
+        <div>${bandNote}</div>
+        <div>${locationLabel}</div>
+        ${fallbackText ? `<div style="color:rgba(255,186,120,0.92);">Fallbacks: ${fallbackText}</div>` : ''}
+      </div>
+    `;
   }
 
   /**
@@ -990,32 +1047,40 @@ function wireCameraControlButtons(viewer) {
 
     setSatelliteStatus('Generating preview...');
     satelliteLoadBtn.disabled = true;
+    satelliteApplyBtn.disabled = true;
 
     try {
-      // Build Earth Engine thumbnail URL
       const collectionRaw = satelliteCollectionInput?.value ?? 'COPERNICUS/S2_SR_HARMONIZED|B4,B3,B2';
       const [collectionId] = collectionRaw.split('|');
       const bands = (satelliteBandsInput?.value ?? '').trim() || 'B4,B3,B2';
       const dateStr = satelliteDateInput.value || '';
-      currentPreviewUrl = null;
-      const earthEngineNote = buildEarthEngineConfigNote(collectionId, bands, dateStr);
-
-      // Display a configured preview card without fabricating an invalid Earth Engine URL.
-      if (satellitePreview) {
-        satellitePreview.style.background = `linear-gradient(135deg, rgba(0,255,136,0.1) 0%, rgba(0,150,100,0.05) 100%), url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><rect fill="%23001a0f" width="512" height="512"/><text x="50%25" y="36%25" dominant-baseline="middle" text-anchor="middle" font-family="monospace" font-size="12" fill="%2300ff88" opacity="0.6">SATELLITE PREVIEW</text><text x="50%25" y="50%25" dominant-baseline="middle" text-anchor="middle" font-family="monospace" font-size="9" fill="%2300ff88" opacity="0.45">${collectionId}</text><text x="50%25" y="60%25" dominant-baseline="middle" text-anchor="middle" font-family="monospace" font-size="9" fill="%2300ff88" opacity="0.4">BANDS ${bands}</text><text x="50%25" y="72%25" dominant-baseline="middle" text-anchor="middle" font-family="monospace" font-size="9" fill="%2300ff88" opacity="0.3">${location.lat.toFixed(4)}°, ${location.lon.toFixed(4)}°</text></svg>')`;
-        satellitePreview.style.backgroundSize = 'contain';
-        satellitePreview.style.backgroundRepeat = 'no-repeat';
-        satellitePreview.style.backgroundPosition = 'center';
-        satellitePreview.innerHTML = `
-          <div style="position:absolute;bottom:8px;left:8px;right:8px;font-family:'Share Tech Mono',monospace;font-size:8px;color:rgba(0,255,136,0.48);word-break:break-word;background:rgba(0,0,0,0.6);padding:4px;border-radius:1px;">
-            Earth Engine request not configured in this build.<br/>${earthEngineNote}
-          </div>
-        `;
+      const source = satelliteSourceInput?.value ?? 'auto';
+      const query = new URLSearchParams({
+        lat: String(location.lat),
+        lon: String(location.lon),
+        date: dateStr,
+        source,
+        collection: collectionId,
+        bands,
+      });
+      const resp = await fetch(`/api/localproxy/api/satellite-imagery/preview?${query.toString()}`, {
+        cache: 'no-store',
+      });
+      const payload = await resp.json().catch(() => ({}));
+      if (!resp.ok) {
+        throw new Error(payload.error || `Imagery preview failed (${resp.status})`);
       }
 
-      setSatelliteStatus('Earth Engine needs OAuth or a server-side service-account proxy. A Google Maps API key will not authenticate it.', true);
+      currentPreviewUrl = payload.previewUrl || null;
+      currentPreviewMeta = payload;
+      renderSatellitePreview(payload, location.name);
+      const fallbackCount = Number(payload.fallbackCount || 0);
+      const fallbackSuffix = fallbackCount > 0 ? ` (${fallbackCount} fallback${fallbackCount === 1 ? '' : 's'})` : '';
+      setSatelliteStatus(`${payload.providerLabel || payload.provider} ready${fallbackSuffix}`);
       satelliteApplyBtn.disabled = false;
     } catch (err) {
+      currentPreviewUrl = null;
+      currentPreviewMeta = null;
       setSatelliteStatus('Error: ' + err.message, true);
     } finally {
       satelliteLoadBtn.disabled = false;
@@ -1026,25 +1091,49 @@ function wireCameraControlButtons(viewer) {
    * Apply satellite imagery layer to globe
    */
   async function applySatelliteImagery() {
-    if (!currentPreviewUrl) {
+    if (!currentPreviewMeta) {
       setSatelliteStatus('Load imagery first', true);
       return;
     }
 
     try {
       setSatelliteStatus('Applying to globe...');
+
+      if (satelliteImageryLayer) {
+        viewer.imageryLayers.remove(satelliteImageryLayer, true);
+        satelliteImageryLayer = null;
+      }
+
+      const rectangle = currentPreviewMeta.rectangle;
+      if (currentPreviewMeta.previewUrl && rectangle) {
+        const provider = new Cesium.SingleTileImageryProvider({
+          url: currentPreviewMeta.previewUrl,
+          rectangle: Cesium.Rectangle.fromDegrees(rectangle.west, rectangle.south, rectangle.east, rectangle.north),
+          credit: currentPreviewMeta.providerLabel || 'Satellite imagery',
+        });
+        satelliteImageryLayer = viewer.imageryLayers.addImageryProvider(provider);
+        satelliteImageryLayer.alpha = 0.92;
+      }
       
       // Parse coordinates from the location input to focus camera
       const location = await parseLocation(satelliteLocationInput.value.trim());
-      if (location) {
-        // Fly to the location
+      if (rectangle) {
+        await viewer.camera.flyTo({
+          destination: Cesium.Rectangle.fromDegrees(rectangle.west, rectangle.south, rectangle.east, rectangle.north),
+          duration: 1.5,
+        });
+      } else if (location) {
         await viewer.camera.flyTo({
           destination: Cesium.Cartesian3.fromDegrees(location.lon, location.lat, 50000),
           duration: 1.5,
         });
       }
 
-      setSatelliteStatus('Imagery applied ✓');
+      setSatelliteStatus(
+        currentPreviewMeta.provider === 'basemap'
+          ? 'Basemap fallback centered on target ✓'
+          : `${currentPreviewMeta.providerLabel || currentPreviewMeta.provider} applied ✓`
+      );
       
       // Close modal after brief delay
       setTimeout(() => {
