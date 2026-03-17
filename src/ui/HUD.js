@@ -616,6 +616,7 @@ function drawReticle(viewer) {
           <select id="satellite-collection-input" style="width:100%;padding:8px 10px;background:rgba(0,0,0,0.5);border:1px solid rgba(0,255,136,0.25);color:#00ff88;font-family:'Share Tech Mono',monospace;font-size:10px;outline:none;">
             <option>Loading collections...</option>
           </select>
+          <div id="satellite-collection-info" style="margin-top:4px;font-family:'Share Tech Mono',monospace;font-size:8px;color:rgba(0,255,136,0.45);letter-spacing:0.05em;">INFO: Loading collection details...</div>
         </div>
         <div>
           <label style="display:block;font-family:'Share Tech Mono',monospace;font-size:9px;letter-spacing:0.1em;color:rgba(0,255,136,0.6);margin-bottom:4px;text-transform:uppercase;">Bands</label>
@@ -1192,6 +1193,40 @@ function wireCameraControlButtons(viewer) {
     },
   ];
   const todayIsoDate = new Date().toISOString().slice(0, 10);
+  const SATELLITE_COLLECTION_INFO = {
+    's2-sr': 'INFO: 10m - 5 days - ESA Copernicus',
+    's2-toa': 'INFO: 10m - 5 days - ESA Copernicus',
+    's1-sar': 'INFO: 10m - 6 days - ESA Copernicus',
+    's3-olci': 'INFO: 300m - 2 days - ESA Copernicus',
+    's5p-no2': 'INFO: 7km - Daily - ESA Copernicus / Sentinel-5P',
+    's5p-co': 'INFO: 7km - Daily - ESA Copernicus / Sentinel-5P',
+    's5p-so2': 'INFO: 7km - Daily - ESA Copernicus / Sentinel-5P',
+    's5p-ch4': 'INFO: 7km - Daily - ESA Copernicus / Sentinel-5P',
+    's5p-aai': 'INFO: 7km - Daily - ESA Copernicus / Sentinel-5P',
+    'l9-sr': 'INFO: 30m - 16 days - NASA / USGS',
+    'l8-sr': 'INFO: 30m - 16 days - NASA / USGS',
+    'l7-sr': 'INFO: 30m - 16 days - NASA / USGS',
+    'l5-sr': 'INFO: 30m - 16 days - NASA / USGS',
+    'l9-toa': 'INFO: 30m - 16 days - NASA / USGS',
+    'l8-toa': 'INFO: 30m - 16 days - NASA / USGS',
+    'modis-terra-500': 'INFO: 500m - Daily - NASA',
+    'modis-aqua-500': 'INFO: 500m - Daily - NASA',
+    'modis-terra-250': 'INFO: 250m - Daily - NASA',
+    'modis-vi': 'INFO: 250m - Daily - NASA',
+    'modis-lst': 'INFO: 1km - Daily - NASA',
+    'modis-fire': 'INFO: 1km - Daily - NASA',
+    'modis-snow': 'INFO: 500m - Daily - NASA',
+    'modis-brdf': 'INFO: 500m - Daily - NASA',
+    'night-slc': 'INFO: 500m - Monthly - NOAA VIIRS',
+    'night-cf': 'INFO: 500m - Monthly - NOAA VIIRS',
+    'viirs-surf-refl': 'INFO: 500m - Daily - NASA VIIRS',
+    'viirs-vi': 'INFO: 500m - Daily - NASA VIIRS',
+    'goes-16': 'INFO: 2km - 5-15 minutes - NOAA GOES',
+    'goes-17': 'INFO: 2km - 5-15 minutes - NOAA GOES',
+    'goes-18': 'INFO: 2km - 5-15 minutes - NOAA GOES',
+    'aster-l1t': 'INFO: 15m - 4-16 days - NASA / METI ASTER',
+    'aster-ged': 'INFO: 100m - Static - NASA ASTER',
+  };
 
   const zoomInBtn = document.getElementById('hud-cam-zoom-in');
   const zoomOutBtn = document.getElementById('hud-cam-zoom-out');
@@ -1208,6 +1243,7 @@ function wireCameraControlButtons(viewer) {
   const satellitePickHint = document.getElementById('satellite-pick-hint');
   const satelliteSourceInput = document.getElementById('satellite-source-input');
   const satelliteCollectionInput = document.getElementById('satellite-collection-input');
+  const satelliteCollectionInfo = document.getElementById('satellite-collection-info');
   const satelliteBandPresetInput = document.getElementById('satellite-band-preset-input');
   const satelliteBandsInput = document.getElementById('satellite-bands-input');
   const satelliteDateInput = document.getElementById('satellite-date-input');
@@ -1410,10 +1446,17 @@ function wireCameraControlButtons(viewer) {
     }
   }
 
+  function updateCollectionInfo(selected) {
+    if (!satelliteCollectionInfo) return;
+    const key = selected?.key ?? '';
+    satelliteCollectionInfo.textContent = SATELLITE_COLLECTION_INFO[key] ?? 'INFO: Resolution/revisit/source metadata unavailable.';
+  }
+
   function applyCollectionPreset(options = {}) {
     if (!satelliteCollectionInput || !satelliteBandsInput || !satelliteBandPresetInput) return;
     const selected = getSelectedCollectionPreset();
     if (!selected) return;
+    updateCollectionInfo(selected);
 
     const preserveBandKey = options.preserveBandKey
       ?? satelliteBandPresetInput.selectedOptions?.[0]?.dataset?.bandKey
