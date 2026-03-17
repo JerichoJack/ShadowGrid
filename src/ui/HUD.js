@@ -579,15 +579,15 @@ function drawReticle(viewer) {
   satelliteModal.innerHTML = `
     <div data-satellite-panel style="
       background: rgba(4,10,18,0.96);
-      border: 2px solid rgba(0,255,136,0.35);
-      border-right: 3px solid rgba(0,255,136,0.7);
+      border: 2px solid rgba(255, 145, 0, 0.35);
+      border-right: 3px solid rgba(255, 145, 0, 0.7);
       backdrop-filter: blur(10px);
       box-shadow: 0 8px 32px rgba(0,0,0,0.6);
       overflow: auto;
       max-height: calc(100vh - 24px);
     ">
       <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 16px;border-bottom:1px solid rgba(0,255,136,0.15);background:rgba(0,255,136,0.05);">
-        <div style="font-family:'Share Tech Mono',monospace;font-size:12px;letter-spacing:0.15em;color:rgba(0,255,136,0.9);text-transform:uppercase;">Satellite Imagery Viewer</div>
+        <div style="font-family:'Share Tech Mono',monospace;font-size:12px;letter-spacing:0.15em;color:rgba(255, 145, 0, 0.9);text-transform:uppercase;">Satellite Imagery Viewer - Partially Working</div>
         <button id="satellite-modal-close" style="background:none;border:none;color:rgba(0,255,136,0.7);font-size:14px;cursor:pointer;padding:4px 8px;">✕</button>
       </div>
       <div style="padding:16px;display:flex;flex-direction:column;gap:12px;">
