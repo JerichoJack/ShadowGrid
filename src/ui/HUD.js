@@ -1118,6 +1118,17 @@ function wireCameraControlButtons(viewer) {
       },
     },
     {
+      key: 'night-vnp46a1',
+      label: 'Night Lights (VNP46A1 Daily)',
+      collectionId: 'NASA/VIIRS/VNP46A1',
+      bands: {
+        true: 'DNB_BRDF_Corrected_NTL',
+        false: 'DNB_BRDF_Corrected_NTL',
+        swir: 'DNB_BRDF_Corrected_NTL',
+        agriculture: 'DNB_BRDF_Corrected_NTL',
+      },
+    },
+    {
       key: 'viirs-surf-refl',
       label: 'VIIRS Surface Refl.',
       collectionId: 'NOAA/VIIRS/001/VNP09GA',
@@ -1222,6 +1233,7 @@ function wireCameraControlButtons(viewer) {
     'modis-brdf': 'INFO: 500m - Daily - NASA',
     'night-slc': 'INFO: 500m - Monthly - NOAA VIIRS',
     'night-cf': 'INFO: 500m - Monthly - NOAA VIIRS',
+    'night-vnp46a1': 'INFO: 500m - Daily - NASA VIIRS Black Marble',
     'viirs-surf-refl': 'INFO: 500m - Daily - NASA VIIRS',
     'viirs-vi': 'INFO: 500m - Daily - NASA VIIRS',
     'goes-16': 'INFO: 2km - 5-15 minutes - NOAA GOES',
@@ -1256,6 +1268,7 @@ function wireCameraControlButtons(viewer) {
     'modis-brdf': 'nasa-gibs',
     'night-slc': 'nasa-gibs',
     'night-cf': 'nasa-gibs',
+    'night-vnp46a1': 'nasa-gibs',
     'viirs-surf-refl': 'nasa-gibs',
     'viirs-vi': 'nasa-gibs',
     'goes-16': 'nasa-gibs',

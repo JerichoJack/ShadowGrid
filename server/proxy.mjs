@@ -244,6 +244,7 @@ const SATELLITE_COLLECTION_BAND_ALLOWLIST = new Map([
   ['MODIS/061/MCD43A4', new Set(['Nadir_Reflectance_Band1,Nadir_Reflectance_Band4,Nadir_Reflectance_Band3', 'Nadir_Reflectance_Band2,Nadir_Reflectance_Band1,Nadir_Reflectance_Band4', 'Nadir_Reflectance_Band6,Nadir_Reflectance_Band2,Nadir_Reflectance_Band1', 'Nadir_Reflectance_Band6,Nadir_Reflectance_Band2,Nadir_Reflectance_Band4'])],
   ['NOAA/VIIRS/DNB/MONTHLY_V1/VCMSLCFG', new Set(['avg_rad'])],
   ['NOAA/VIIRS/DNB/MONTHLY_V1/VCMCFG', new Set(['avg_rad'])],
+  ['NASA/VIIRS/VNP46A1', new Set(['DNB_BRDF_Corrected_NTL'])],
   ['NOAA/VIIRS/001/VNP09GA', new Set(['M5,M4,M3', 'M7,M5,M4', 'M11,M7,M5', 'M11,M7,M4'])],
   ['NOAA/VIIRS/001/VNP13A1', new Set(['NDVI', 'EVI', 'EVI2'])],
   ['NOAA/GOES/16/MCMIPF', new Set(['CMI_C02,CMI_C02,CMI_C01', 'CMI_C03,CMI_C02,CMI_C01', 'CMI_C13,CMI_C07,CMI_C02', 'CMI_C02', 'CMI_C08', 'CMI_C13'])],
@@ -307,6 +308,14 @@ function getCollectionBackendPolicy(collectionId) {
   if (id === 'NOAA/VIIRS/DNB/MONTHLY_V1/VCMSLCFG' || id === 'NOAA/VIIRS/DNB/MONTHLY_V1/VCMCFG') {
     return {
       authority: 'NOAA VIIRS',
+      preferredBackend: 'nasa-gibs',
+      allowedSources: ['auto', 'nasa-gibs', 'copernicus-dataspace', 'sentinel-hub', 'basemap'],
+      requiresRemoteCredentials: false,
+    };
+  }
+  if (id === 'NASA/VIIRS/VNP46A1') {
+    return {
+      authority: 'NASA VIIRS Black Marble',
       preferredBackend: 'nasa-gibs',
       allowedSources: ['auto', 'nasa-gibs', 'copernicus-dataspace', 'sentinel-hub', 'basemap'],
       requiresRemoteCredentials: false,
@@ -473,12 +482,26 @@ function getNasaGibsLayerCandidates(collectionId, bands) {
   const normalizedBands = String(bands || '').toUpperCase().replace(/\s+/g, '');
   const falseColor = normalizedBands.includes('B8') || normalizedBands.includes('B11') || normalizedBands.includes('SR_B5');
 
-  if (id === 'NOAA/VIIRS/DNB/MONTHLY_V1/VCMSLCFG' || id === 'NOAA/VIIRS/DNB/MONTHLY_V1/VCMCFG') {
+  if (id === 'NOAA/VIIRS/DNB/MONTHLY_V1/VCMSLCFG' || id === 'NOAA/VIIRS/DNB/MONTHLY_V1/VCMCFG' || id === 'NASA/VIIRS/VNP46A1') {
     return [
       {
+        layer: 'VIIRS_SNPP_GapFilled_BRDF_Corrected_DayNightBand_Radiance',
+        note: id === 'NASA/VIIRS/VNP46A1'
+          ? 'NASA GIBS VIIRS gap-filled night radiance composite (VNP46A1-compatible mapping).'
+          : 'NASA GIBS VIIRS gap-filled night radiance composite.',
+        bandNote: id === 'NASA/VIIRS/VNP46A1'
+          ? 'Requested VNP46A1 night-lights band mapped to VIIRS gap-filled night-radiance imagery.'
+          : 'Requested radiance mapped to VIIRS gap-filled night-radiance imagery.',
+      },
+      {
+        layer: 'VIIRS_SNPP_DayNightBand_At_Sensor_Radiance',
+        note: 'NASA GIBS VIIRS Day/Night Band at-sensor radiance composite.',
+        bandNote: 'Fallback mapped to VIIRS Day/Night Band at-sensor radiance imagery.',
+      },
+      {
         layer: 'VIIRS_Black_Marble',
-        note: 'NASA GIBS VIIRS Black Marble night-lights composite.',
-        bandNote: 'Requested radiance mapped to NASA GIBS night-lights layer.',
+        note: 'NASA GIBS VIIRS Black Marble legacy annual composite.',
+        bandNote: 'Final fallback mapped to legacy Black Marble annual imagery (limited dates).',
       },
     ];
   }
