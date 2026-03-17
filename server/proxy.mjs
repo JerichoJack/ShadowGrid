@@ -276,24 +276,24 @@ function getCollectionBackendPolicy(collectionId) {
   if (id.startsWith('COPERNICUS/S5P/')) {
     return {
       authority: 'ESA Copernicus / Sentinel-5P',
-      preferredBackend: 'copernicus-dataspace',
-      allowedSources: ['auto', 'copernicus-dataspace', 'sentinel-hub', 'basemap'],
+      preferredBackend: 'nasa-gibs', // changed from 'copernicus-dataspace' for troubleshooting
+      allowedSources: ['auto', 'nasa-gibs', 'copernicus-dataspace', 'sentinel-hub', 'basemap'], // added 'nasa-gibs' for troubleshooting
       requiresRemoteCredentials: true,
     };
   }
   if (id.startsWith('COPERNICUS/')) {
     return {
       authority: 'ESA Copernicus',
-      preferredBackend: 'copernicus-dataspace',
-      allowedSources: ['auto', 'copernicus-dataspace', 'sentinel-hub', 'basemap'],
+      preferredBackend: 'nasa-gibs', // changed from 'copernicus-dataspace' for troubleshooting
+      allowedSources: ['auto', 'nasa-gibs', 'copernicus-dataspace', 'sentinel-hub', 'basemap'], // added 'nasa-gibs' for troubleshooting
       requiresRemoteCredentials: true,
     };
   }
   if (id.startsWith('LANDSAT/')) {
     return {
       authority: 'NASA / USGS',
-      preferredBackend: 'copernicus-dataspace',
-      allowedSources: ['auto', 'copernicus-dataspace', 'sentinel-hub', 'basemap'],
+      preferredBackend: 'nasa-gibs', // changed from 'copernicus-dataspace' for troubleshooting
+      allowedSources: ['auto', 'nasa-gibs', 'copernicus-dataspace', 'sentinel-hub', 'basemap'], // added 'nasa-gibs' for troubleshooting
       requiresRemoteCredentials: true,
     };
   }
@@ -340,16 +340,16 @@ function getCollectionBackendPolicy(collectionId) {
   if (id === 'ASTER/AST_L1T_003') {
     return {
       authority: 'NASA / METI ASTER',
-      preferredBackend: 'copernicus-dataspace',
-      allowedSources: ['auto', 'copernicus-dataspace', 'sentinel-hub', 'basemap'],
+      preferredBackend: 'nasa-gibs', // changed from 'copernicus-dataspace' for troubleshooting
+      allowedSources: ['auto', 'nasa-gibs', 'copernicus-dataspace', 'sentinel-hub', 'basemap'], // added 'nasa-gibs' for troubleshooting
       requiresRemoteCredentials: true,
     };
   }
   if (id === 'NASA/ASTER_GED/AG100_003') {
     return {
       authority: 'NASA ASTER',
-      preferredBackend: 'copernicus-dataspace',
-      allowedSources: ['auto', 'copernicus-dataspace', 'sentinel-hub', 'basemap'],
+      preferredBackend: 'nasa-gibs', // changed from 'copernicus-dataspace' for troubleshooting
+      allowedSources: ['auto', 'nasa-gibs', 'copernicus-dataspace', 'sentinel-hub', 'basemap'], // added 'nasa-gibs' for troubleshooting
       requiresRemoteCredentials: true,
     };
   }
