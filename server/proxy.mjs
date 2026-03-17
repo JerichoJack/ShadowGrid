@@ -59,6 +59,16 @@ const DOTENV_VARS = loadDotEnvVars();
 const GOOGLE_ROUTES_KEY = process.env.VITE_GOOGLE_MAPS_API_KEY || DOTENV_VARS.get('VITE_GOOGLE_MAPS_API_KEY') || '';
 const BACKEND_FLIGHT_PROVIDER = (process.env.VITE_FLIGHT_PROVIDER || DOTENV_VARS.get('VITE_FLIGHT_PROVIDER') || 'opensky').toLowerCase();
 const BACKEND_SATELLITE_PROVIDER = (process.env.VITE_SATELLITE_PROVIDER || DOTENV_VARS.get('VITE_SATELLITE_PROVIDER') || 'celestrak').toLowerCase();
+const BACKEND_SATELLITE_IMAGERY_PROVIDER = (
+  process.env.VITE_SATELLITE_IMAGERY_PROVIDER
+  || DOTENV_VARS.get('VITE_SATELLITE_IMAGERY_PROVIDER')
+  || process.env.SATELLITE_IMAGERY_PROVIDER
+  || DOTENV_VARS.get('SATELLITE_IMAGERY_PROVIDER')
+  // Backward-compat fallback: older setups may have used VITE_SATELLITE_PROVIDER.
+  || process.env.VITE_SATELLITE_PROVIDER
+  || DOTENV_VARS.get('VITE_SATELLITE_PROVIDER')
+  || ''
+).toLowerCase();
 const BACKEND_TRAFFIC_PROVIDER = (process.env.VITE_TRAFFIC_PROVIDER || DOTENV_VARS.get('VITE_TRAFFIC_PROVIDER') || 'auto').toLowerCase();
 const BACKEND_MARINE_PROVIDER = (process.env.VITE_MARINE_PROVIDER || DOTENV_VARS.get('VITE_MARINE_PROVIDER') || 'auto').toLowerCase();
 const OPENSKY_CLIENT_ID = process.env.VITE_OPENSKY_CLIENT_ID || DOTENV_VARS.get('VITE_OPENSKY_CLIENT_ID') || '';
@@ -290,7 +300,7 @@ function getCollectionBackendPolicy(collectionId) {
     return {
       authority: 'NASA',
       preferredBackend: 'nasa-gibs',
-      allowedSources: ['auto', 'nasa-gibs', 'basemap'],
+      allowedSources: ['auto', 'nasa-gibs', 'copernicus-dataspace', 'sentinel-hub', 'basemap'],
       requiresRemoteCredentials: false,
     };
   }
@@ -298,7 +308,7 @@ function getCollectionBackendPolicy(collectionId) {
     return {
       authority: 'NOAA VIIRS',
       preferredBackend: 'nasa-gibs',
-      allowedSources: ['auto', 'nasa-gibs', 'basemap'],
+      allowedSources: ['auto', 'nasa-gibs', 'copernicus-dataspace', 'sentinel-hub', 'basemap'],
       requiresRemoteCredentials: false,
     };
   }
@@ -306,7 +316,7 @@ function getCollectionBackendPolicy(collectionId) {
     return {
       authority: 'NASA VIIRS',
       preferredBackend: 'nasa-gibs',
-      allowedSources: ['auto', 'nasa-gibs', 'basemap'],
+      allowedSources: ['auto', 'nasa-gibs', 'copernicus-dataspace', 'sentinel-hub', 'basemap'],
       requiresRemoteCredentials: false,
     };
   }
@@ -314,7 +324,7 @@ function getCollectionBackendPolicy(collectionId) {
     return {
       authority: 'NOAA GOES',
       preferredBackend: 'nasa-gibs',
-      allowedSources: ['auto', 'nasa-gibs', 'basemap'],
+      allowedSources: ['auto', 'nasa-gibs', 'copernicus-dataspace', 'sentinel-hub', 'basemap'],
       requiresRemoteCredentials: false,
     };
   }
@@ -450,6 +460,88 @@ function getImageryIntent(collectionId, bands) {
   return { falseColor, prefersSentinelHub, prefersLandsat };
 }
 
+function getConfiguredSatelliteProvider() {
+  const provider = String(BACKEND_SATELLITE_IMAGERY_PROVIDER || '').trim().toLowerCase();
+  if (provider === 'nasa-gibs') return 'nasa-gibs';
+  if (provider === 'sentinel-hub') return 'sentinel-hub';
+  if (provider === 'copernicus-dataspace') return 'copernicus-dataspace';
+  return null;
+}
+
+function getNasaGibsLayerCandidates(collectionId, bands) {
+  const id = String(collectionId || '').toUpperCase();
+  const normalizedBands = String(bands || '').toUpperCase().replace(/\s+/g, '');
+  const falseColor = normalizedBands.includes('B8') || normalizedBands.includes('B11') || normalizedBands.includes('SR_B5');
+
+  if (id === 'NOAA/VIIRS/DNB/MONTHLY_V1/VCMSLCFG' || id === 'NOAA/VIIRS/DNB/MONTHLY_V1/VCMCFG') {
+    return [
+      {
+        layer: 'VIIRS_Black_Marble',
+        note: 'NASA GIBS VIIRS Black Marble night-lights composite.',
+        bandNote: 'Requested radiance mapped to NASA GIBS night-lights layer.',
+      },
+    ];
+  }
+
+  if (id === 'MODIS/061/MYD09GA') {
+    return [
+      {
+        layer: falseColor ? 'MODIS_Aqua_CorrectedReflectance_Bands721' : 'MODIS_Aqua_CorrectedReflectance_TrueColor',
+        note: falseColor ? 'NASA GIBS MODIS Aqua false-color composite.' : 'NASA GIBS MODIS Aqua true-color daily composite.',
+        bandNote: falseColor ? 'Requested false-color bands mapped to MODIS Aqua Bands 7-2-1.' : 'Requested bands mapped to NASA GIBS MODIS Aqua true-color imagery.',
+      },
+      {
+        layer: falseColor ? 'MODIS_Terra_CorrectedReflectance_Bands367' : 'MODIS_Terra_CorrectedReflectance_TrueColor',
+        note: falseColor ? 'NASA GIBS MODIS Terra false-color fallback composite.' : 'NASA GIBS MODIS Terra true-color fallback composite.',
+        bandNote: falseColor ? 'Fell back to MODIS Terra false-color layer.' : 'Fell back to MODIS Terra true-color layer.',
+      },
+    ];
+  }
+
+  if (id.startsWith('NOAA/GOES/16/')) {
+    return [
+      {
+        layer: 'GOES-East_ABI_GeoColor',
+        note: 'NASA GIBS GOES-East ABI GeoColor composite.',
+        bandNote: 'Requested GOES bands mapped to ABI GeoColor imagery.',
+      },
+    ];
+  }
+
+  if (id.startsWith('NOAA/GOES/17/') || id.startsWith('NOAA/GOES/18/')) {
+    return [
+      {
+        layer: 'GOES-West_ABI_GeoColor',
+        note: 'NASA GIBS GOES-West ABI GeoColor composite.',
+        bandNote: 'Requested GOES bands mapped to ABI GeoColor imagery.',
+      },
+    ];
+  }
+
+  if (id.startsWith('NOAA/VIIRS/')) {
+    return [
+      {
+        layer: falseColor ? 'VIIRS_SNPP_CorrectedReflectance_BandsM11-I2-I1' : 'VIIRS_SNPP_CorrectedReflectance_TrueColor',
+        note: falseColor ? 'NASA GIBS VIIRS SNPP false-color composite.' : 'NASA GIBS VIIRS SNPP true-color daily composite.',
+        bandNote: falseColor ? 'Requested bands mapped to VIIRS M11-I2-I1 false-color imagery.' : 'Requested bands mapped to VIIRS SNPP true-color imagery.',
+      },
+      {
+        layer: falseColor ? 'MODIS_Terra_CorrectedReflectance_Bands367' : 'MODIS_Terra_CorrectedReflectance_TrueColor',
+        note: falseColor ? 'NASA GIBS MODIS false-color fallback composite.' : 'NASA GIBS MODIS true-color fallback composite.',
+        bandNote: falseColor ? 'Fell back to MODIS false-color layer.' : 'Fell back to MODIS true-color layer.',
+      },
+    ];
+  }
+
+  return [
+    {
+      layer: falseColor ? 'MODIS_Terra_CorrectedReflectance_Bands367' : 'MODIS_Terra_CorrectedReflectance_TrueColor',
+      note: falseColor ? 'NASA GIBS MODIS false-color composite.' : 'NASA GIBS MODIS true-color daily composite.',
+      bandNote: falseColor ? 'Requested false-color bands mapped to MODIS Bands 3-6-7.' : 'Requested bands mapped to NASA GIBS true-color imagery.',
+    },
+  ];
+}
+
 function pickSatelliteSourceOrder(source, collectionId, bands) {
   const requested = String(source || 'auto').toLowerCase();
   const policy = getCollectionBackendPolicy(collectionId);
@@ -459,19 +551,33 @@ function pickSatelliteSourceOrder(source, collectionId, bands) {
   if (requested === 'copernicus-dataspace') return ['copernicus-dataspace', 'basemap'];
 
   const autoOrder = [];
-  if (policy.preferredBackend === 'copernicus-dataspace') {
-    if (COPERNICUS_DATASPACE_WMS_URL) autoOrder.push('copernicus-dataspace');
-    if (SENTINEL_HUB_WMS_URL) autoOrder.push('sentinel-hub');
-  } else if (policy.preferredBackend === 'sentinel-hub') {
-    if (SENTINEL_HUB_WMS_URL) autoOrder.push('sentinel-hub');
-    if (COPERNICUS_DATASPACE_WMS_URL) autoOrder.push('copernicus-dataspace');
-  } else {
-    autoOrder.push(policy.preferredBackend);
-  }
+  const configuredProvider = getConfiguredSatelliteProvider();
+  const canUseCopernicus = Boolean(COPERNICUS_DATASPACE_WMS_URL);
+  const canUseSentinel = Boolean(SENTINEL_HUB_WMS_URL);
 
-  if (!autoOrder.includes('nasa-gibs') && policy.preferredBackend === 'nasa-gibs') {
+  if (configuredProvider === 'copernicus-dataspace' && canUseCopernicus) {
+    autoOrder.push('copernicus-dataspace');
+  }
+  if (configuredProvider === 'sentinel-hub' && canUseSentinel) {
+    autoOrder.push('sentinel-hub');
+  }
+  if (configuredProvider === 'nasa-gibs') {
     autoOrder.push('nasa-gibs');
   }
+
+  if (policy.preferredBackend === 'copernicus-dataspace') {
+    if (canUseCopernicus) autoOrder.push('copernicus-dataspace');
+    if (canUseSentinel) autoOrder.push('sentinel-hub');
+  } else if (policy.preferredBackend === 'sentinel-hub') {
+    if (canUseSentinel) autoOrder.push('sentinel-hub');
+    if (canUseCopernicus) autoOrder.push('copernicus-dataspace');
+  } else {
+    autoOrder.push(policy.preferredBackend);
+    if (canUseCopernicus) autoOrder.push('copernicus-dataspace');
+    if (canUseSentinel) autoOrder.push('sentinel-hub');
+  }
+
+  autoOrder.push('nasa-gibs');
 
   autoOrder.push('basemap');
   return [...new Set(autoOrder)];
@@ -510,25 +616,28 @@ async function verifyPreviewUrl(url) {
 async function buildNasaGibsPreview({ lat, lon, date, collectionId, bands }) {
   const rectangle = computeImageryRectangle(lat, lon, 120);
   const isoDate = normalizeIsoDate(date);
-  const { falseColor } = getImageryIntent(collectionId, bands);
-  const layer = falseColor
-    ? 'MODIS_Terra_CorrectedReflectance_Bands367'
-    : 'MODIS_Terra_CorrectedReflectance_TrueColor';
-  const previewUrl = buildWmsPreviewUrl(NASA_GIBS_WMS_URL, { layer, rectangle, date: isoDate });
-  await verifyPreviewUrl(previewUrl);
-  return {
-    provider: 'nasa-gibs',
-    providerLabel: 'NASA GIBS',
-    previewUrl,
-    rectangle,
-    date: isoDate,
-    note: falseColor
-      ? 'NASA GIBS MODIS false-color composite.'
-      : 'NASA GIBS MODIS true-color daily composite.',
-    bandNote: falseColor
-      ? 'Requested false-color bands mapped to MODIS Bands 3-6-7.'
-      : 'Requested bands mapped to NASA GIBS true-color imagery.',
-  };
+  const candidates = getNasaGibsLayerCandidates(collectionId, bands);
+  const failures = [];
+
+  for (const candidate of candidates) {
+    try {
+      const previewUrl = buildWmsPreviewUrl(NASA_GIBS_WMS_URL, { layer: candidate.layer, rectangle, date: isoDate });
+      await verifyPreviewUrl(previewUrl);
+      return {
+        provider: 'nasa-gibs',
+        providerLabel: 'NASA GIBS',
+        previewUrl,
+        rectangle,
+        date: isoDate,
+        note: candidate.note,
+        bandNote: candidate.bandNote,
+      };
+    } catch (err) {
+      failures.push(`${candidate.layer}: ${err?.message ?? 'failed'}`);
+    }
+  }
+
+  throw new Error(`NASA GIBS preview failed for '${collectionId}'. ${failures.join(' | ')}`);
 }
 
 async function buildSentinelHubPreview({ lat, lon, date, collectionId, bands }) {
@@ -3318,7 +3427,7 @@ server.listen(PORT, () => {
   ensureTileCacheDir();
   loadSnapshotCacheFromDisk();
   console.log(`[proxy] Mode: ${SERVER_HEAVY_MODE ? 'heavy' : 'normal'}`);
-  console.log(`[proxy] Providers: flights=${BACKEND_FLIGHT_PROVIDER}, satellites=${BACKEND_SATELLITE_PROVIDER}`);
+  console.log(`[proxy] Providers: flights=${BACKEND_FLIGHT_PROVIDER}, satellites=${BACKEND_SATELLITE_PROVIDER}, satelliteImagery=${BACKEND_SATELLITE_IMAGERY_PROVIDER || 'auto'}`);
   console.log(`[proxy] ShadowGrid → http://localhost:${PORT}/api/flights?bounds=minLon,minLat,maxLon,maxLat`);
   ensureSatelliteCatalog()
     .then(() => {

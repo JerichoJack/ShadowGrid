@@ -193,17 +193,17 @@ Set `VITE_TRAFFIC_PROVIDER` to one of:
 The HUD Imagery panel now pulls preview imagery through the local proxy route `/api/localproxy/api/satellite-imagery/preview`.
 
 - Requests are now validated server-side for allowed `collection + bands + source` combinations.
-- The viewer enforces backend policy by collection authority:
+- The viewer enforces backend policy by collection authority, while still allowing configured credential-backed backends when available:
 
 | Authority | Preferred Backend | Credentials Required? |
 |---|---|---|
 | ESA Copernicus | Copernicus Data Space | ✅ Yes |
 | ESA Copernicus / Sentinel-5P | Copernicus Data Space | ✅ Yes |
 | NASA / USGS (Landsat) | Copernicus Data Space | ✅ Yes |
-| NASA (MODIS) | NASA GIBS | ❌ No |
-| NOAA VIIRS (Night Lights) | NASA GIBS | ❌ No |
-| NASA VIIRS | NASA GIBS | ❌ No |
-| NOAA GOES | NASA GIBS | ❌ No |
+| NASA (MODIS) | NASA GIBS (default) | ❌ No |
+| NOAA VIIRS (Night Lights) | NASA GIBS (default) | ❌ No |
+| NASA VIIRS | NASA GIBS (default) | ❌ No |
+| NOAA GOES | NASA GIBS (default) | ❌ No |
 | NASA / METI ASTER | Copernicus Data Space | ✅ Yes |
 | NASA ASTER | Copernicus Data Space | ✅ Yes |
 
@@ -223,6 +223,17 @@ SENTINEL_HUB_TRUE_COLOR_LAYER=TRUE_COLOR
 SENTINEL_HUB_FALSE_COLOR_LAYER=FALSE_COLOR
 ```
 
+- Optional imagery backend preference for `Source=Auto`:
+
+```env
+VITE_SATELLITE_IMAGERY_PROVIDER=auto
+```
+
+Allowed values: `auto`, `copernicus-dataspace`, `sentinel-hub`, `nasa-gibs`.
+
+- `VITE_SATELLITE_IMAGERY_PROVIDER` controls imagery backend preference only, and is separate from `VITE_SATELLITE_PROVIDER` (satellite object/TLE provider).
+
+- `Auto` source now prioritizes the configured imagery provider (`VITE_SATELLITE_IMAGERY_PROVIDER`; legacy fallback to `VITE_SATELLITE_PROVIDER` is still supported), then falls back through policy-backed providers and finally basemap.
 - For Copernicus-backed collections, missing credentials now return a clear API error with setup guidance.
 - NASA GIBS-backed collections run credential-free and fall back to basemap if remote imagery is unavailable.
 
@@ -258,6 +269,7 @@ VITE_CESIUM_ION_TOKEN=your_cesium_ion_token_here
 VITE_FLIGHT_PROVIDER=opensky
 
 VITE_SATELLITE_PROVIDER=celestrak
+VITE_SATELLITE_IMAGERY_PROVIDER=auto
 ```
 
 Then generate camera database and tiles (for CCTV layer):
