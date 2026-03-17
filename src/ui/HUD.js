@@ -614,21 +614,25 @@ function drawReticle(viewer) {
         <div>
           <label style="display:block;font-family:'Share Tech Mono',monospace;font-size:9px;letter-spacing:0.1em;color:rgba(0,255,136,0.6);margin-bottom:4px;text-transform:uppercase;">Collection</label>
           <select id="satellite-collection-input" style="width:100%;padding:8px 10px;background:rgba(0,0,0,0.5);border:1px solid rgba(0,255,136,0.25);color:#00ff88;font-family:'Share Tech Mono',monospace;font-size:10px;outline:none;">
-            <option value="COPERNICUS/S2_SR_HARMONIZED|B4,B3,B2">Sentinel-2 SR Harmonized</option>
-            <option value="LANDSAT/LC08/C02/T1_L2|SR_B4,SR_B3,SR_B2">Landsat 8 Collection 2 L2</option>
-            <option value="LANDSAT/LC09/C02/T1_L2|SR_B4,SR_B3,SR_B2">Landsat 9 Collection 2 L2</option>
-            <option value="COPERNICUS/S2_HARMONIZED|B8,B4,B3">Sentinel-2 False Color</option>
-            <option value="MODIS/061/MOD09GA|sur_refl_b01,sur_refl_b04,sur_refl_b03">MODIS Terra Surface Reflectance</option>
+            <option>Loading collections...</option>
           </select>
         </div>
         <div>
           <label style="display:block;font-family:'Share Tech Mono',monospace;font-size:9px;letter-spacing:0.1em;color:rgba(0,255,136,0.6);margin-bottom:4px;text-transform:uppercase;">Bands</label>
-          <input id="satellite-bands-input" type="text" value="B4,B3,B2" placeholder="B4,B3,B2" style="width:100%;padding:8px 10px;background:rgba(0,0,0,0.5);border:1px solid rgba(0,255,136,0.25);color:#00ff88;font-family:'Share Tech Mono',monospace;font-size:10px;outline:none;box-sizing:border-box;"/>
-          <div style="margin-top:4px;font-family:'Share Tech Mono',monospace;font-size:8px;color:rgba(0,255,136,0.45);letter-spacing:0.05em;">Comma-separated band list, for example B4,B3,B2</div>
+          <select id="satellite-band-preset-input" style="width:100%;padding:8px 10px;background:rgba(0,0,0,0.5);border:1px solid rgba(0,255,136,0.25);color:#00ff88;font-family:'Share Tech Mono',monospace;font-size:10px;outline:none;">
+            <option value="true">True Colour</option>
+            <option value="false">False Colour</option>
+            <option value="swir">SWIR</option>
+            <option value="agriculture">Agriculture</option>
+          </select>
+          <input id="satellite-bands-input" type="text" value="B4,B3,B2" readonly style="width:100%;margin-top:8px;padding:8px 10px;background:rgba(0,0,0,0.38);border:1px solid rgba(0,255,136,0.15);color:rgba(0,255,136,0.88);font-family:'Share Tech Mono',monospace;font-size:10px;outline:none;box-sizing:border-box;"/>
+          <div style="margin-top:4px;font-family:'Share Tech Mono',monospace;font-size:8px;color:rgba(0,255,136,0.45);letter-spacing:0.05em;">Band expression is auto-filled from Collection + Bands.</div>
         </div>
         <div>
           <label style="display:block;font-family:'Share Tech Mono',monospace;font-size:9px;letter-spacing:0.1em;color:rgba(0,255,136,0.6);margin-bottom:4px;text-transform:uppercase;">Date</label>
           <input id="satellite-date-input" type="date" style="width:100%;padding:8px 10px;background:rgba(0,0,0,0.5);border:1px solid rgba(0,255,136,0.25);color:#00ff88;font-family:'Share Tech Mono',monospace;font-size:10px;outline:none;box-sizing:border-box;"/>
+          <div id="satellite-date-state" style="margin-top:6px;display:inline-flex;align-items:center;gap:6px;padding:3px 7px;border:1px solid rgba(0,255,136,0.25);background:rgba(0,255,136,0.08);color:rgba(0,255,136,0.9);font-family:'Share Tech Mono',monospace;font-size:8px;letter-spacing:0.08em;text-transform:uppercase;">Date: Today</div>
+          <div style="margin-top:4px;font-family:'Share Tech Mono',monospace;font-size:8px;color:rgba(0,255,136,0.45);letter-spacing:0.05em;">Calendar defaults to today; choosing another date highlights this field.</div>
         </div>
         <div style="position:relative;width:100%;padding-top:100%;background:rgba(0,0,0,0.3);border:1px solid rgba(0,255,136,0.15);overflow:hidden;border-radius:2px;">
           <div id="satellite-preview" style="position:absolute;top:0;left:0;width:100%;height:100%;display:flex;align-items:center;justify-content:center;color:rgba(0,255,136,0.5);font-size:12px;font-family:'Share Tech Mono',monospace;">Click \"Load\" to fetch imagery</div>
@@ -833,6 +837,368 @@ function drawReticle(viewer) {
 }
 
 function wireCameraControlButtons(viewer) {
+  const SATELLITE_COLLECTION_PRESETS = [
+    {
+      key: 's2-sr',
+      label: 'Sentinel-2 SR',
+      collectionId: 'COPERNICUS/S2_SR_HARMONIZED',
+      bands: {
+        true: 'B4,B3,B2',
+        false: 'B8,B4,B3',
+        swir: 'B12,B8,B4',
+        agriculture: 'B11,B8,B2',
+      },
+    },
+    {
+      key: 's2-toa',
+      label: 'Sentinel-2 TOA',
+      collectionId: 'COPERNICUS/S2_HARMONIZED',
+      bands: {
+        true: 'B4,B3,B2',
+        false: 'B8,B4,B3',
+        swir: 'B12,B8,B4',
+        agriculture: 'B11,B8,B2',
+      },
+    },
+    {
+      key: 's1-sar',
+      label: 'Sentinel-1 SAR',
+      collectionId: 'COPERNICUS/S1_GRD',
+      bands: {
+        true: 'VV,VH',
+        false: 'VV,VH',
+        swir: 'VV,VH',
+        agriculture: 'VV,VH',
+      },
+    },
+    {
+      key: 's3-olci',
+      label: 'Sentinel-3 OLCI',
+      collectionId: 'COPERNICUS/S3/OLCI',
+      bands: {
+        true: 'Oa08_radiance,Oa06_radiance,Oa04_radiance',
+        false: 'Oa17_radiance,Oa08_radiance,Oa06_radiance',
+        swir: 'Oa21_radiance,Oa17_radiance,Oa08_radiance',
+        agriculture: 'Oa17_radiance,Oa08_radiance,Oa04_radiance',
+      },
+    },
+    {
+      key: 's5p-no2',
+      label: 'S5P NO2',
+      collectionId: 'COPERNICUS/S5P/OFFL/L3_NO2',
+      bands: {
+        true: 'tropospheric_NO2_column_number_density',
+        false: 'tropospheric_NO2_column_number_density',
+        swir: 'tropospheric_NO2_column_number_density',
+        agriculture: 'tropospheric_NO2_column_number_density',
+      },
+    },
+    {
+      key: 's5p-co',
+      label: 'S5P CO',
+      collectionId: 'COPERNICUS/S5P/OFFL/L3_CO',
+      bands: {
+        true: 'CO_column_number_density',
+        false: 'CO_column_number_density',
+        swir: 'CO_column_number_density',
+        agriculture: 'CO_column_number_density',
+      },
+    },
+    {
+      key: 's5p-so2',
+      label: 'S5P SO2',
+      collectionId: 'COPERNICUS/S5P/OFFL/L3_SO2',
+      bands: {
+        true: 'SO2_column_number_density',
+        false: 'SO2_column_number_density',
+        swir: 'SO2_column_number_density',
+        agriculture: 'SO2_column_number_density',
+      },
+    },
+    {
+      key: 's5p-ch4',
+      label: 'S5P CH4',
+      collectionId: 'COPERNICUS/S5P/OFFL/L3_CH4',
+      bands: {
+        true: 'CH4_column_volume_mixing_ratio_dry_air',
+        false: 'CH4_column_volume_mixing_ratio_dry_air',
+        swir: 'CH4_column_volume_mixing_ratio_dry_air',
+        agriculture: 'CH4_column_volume_mixing_ratio_dry_air',
+      },
+    },
+    {
+      key: 's5p-aai',
+      label: 'S5P Aerosol AI',
+      collectionId: 'COPERNICUS/S5P/OFFL/L3_AER_AI',
+      bands: {
+        true: 'absorbing_aerosol_index',
+        false: 'absorbing_aerosol_index',
+        swir: 'absorbing_aerosol_index',
+        agriculture: 'absorbing_aerosol_index',
+      },
+    },
+    {
+      key: 'l9-sr',
+      label: 'Landsat 9 SR',
+      collectionId: 'LANDSAT/LC09/C02/T1_L2',
+      bands: {
+        true: 'SR_B4,SR_B3,SR_B2',
+        false: 'SR_B5,SR_B4,SR_B3',
+        swir: 'SR_B6,SR_B5,SR_B4',
+        agriculture: 'SR_B6,SR_B5,SR_B2',
+      },
+    },
+    {
+      key: 'l8-sr',
+      label: 'Landsat 8 SR',
+      collectionId: 'LANDSAT/LC08/C02/T1_L2',
+      bands: {
+        true: 'SR_B4,SR_B3,SR_B2',
+        false: 'SR_B5,SR_B4,SR_B3',
+        swir: 'SR_B6,SR_B5,SR_B4',
+        agriculture: 'SR_B6,SR_B5,SR_B2',
+      },
+    },
+    {
+      key: 'l7-sr',
+      label: 'Landsat 7 SR',
+      collectionId: 'LANDSAT/LE07/C02/T1_L2',
+      bands: {
+        true: 'SR_B3,SR_B2,SR_B1',
+        false: 'SR_B4,SR_B3,SR_B2',
+        swir: 'SR_B5,SR_B4,SR_B3',
+        agriculture: 'SR_B5,SR_B4,SR_B2',
+      },
+    },
+    {
+      key: 'l5-sr',
+      label: 'Landsat 5 SR',
+      collectionId: 'LANDSAT/LT05/C02/T1_L2',
+      bands: {
+        true: 'SR_B3,SR_B2,SR_B1',
+        false: 'SR_B4,SR_B3,SR_B2',
+        swir: 'SR_B5,SR_B4,SR_B3',
+        agriculture: 'SR_B5,SR_B4,SR_B2',
+      },
+    },
+    {
+      key: 'l9-toa',
+      label: 'Landsat 9 TOA',
+      collectionId: 'LANDSAT/LC09/C02/T1_TOA',
+      bands: {
+        true: 'B4,B3,B2',
+        false: 'B5,B4,B3',
+        swir: 'B6,B5,B4',
+        agriculture: 'B6,B5,B2',
+      },
+    },
+    {
+      key: 'l8-toa',
+      label: 'Landsat 8 TOA',
+      collectionId: 'LANDSAT/LC08/C02/T1_TOA',
+      bands: {
+        true: 'B4,B3,B2',
+        false: 'B5,B4,B3',
+        swir: 'B6,B5,B4',
+        agriculture: 'B6,B5,B2',
+      },
+    },
+    {
+      key: 'modis-terra-500',
+      label: 'MODIS Terra 500m',
+      collectionId: 'MODIS/061/MOD09GA',
+      bands: {
+        true: 'sur_refl_b01,sur_refl_b04,sur_refl_b03',
+        false: 'sur_refl_b02,sur_refl_b01,sur_refl_b04',
+        swir: 'sur_refl_b06,sur_refl_b02,sur_refl_b01',
+        agriculture: 'sur_refl_b06,sur_refl_b02,sur_refl_b04',
+      },
+    },
+    {
+      key: 'modis-aqua-500',
+      label: 'MODIS Aqua 500m',
+      collectionId: 'MODIS/061/MYD09GA',
+      bands: {
+        true: 'sur_refl_b01,sur_refl_b04,sur_refl_b03',
+        false: 'sur_refl_b02,sur_refl_b01,sur_refl_b04',
+        swir: 'sur_refl_b06,sur_refl_b02,sur_refl_b01',
+        agriculture: 'sur_refl_b06,sur_refl_b02,sur_refl_b04',
+      },
+    },
+    {
+      key: 'modis-terra-250',
+      label: 'MODIS Terra 250m',
+      collectionId: 'MODIS/061/MOD09GQ',
+      bands: {
+        true: 'sur_refl_b01,sur_refl_b02,sur_refl_b01',
+        false: 'sur_refl_b02,sur_refl_b01,sur_refl_b02',
+        swir: 'sur_refl_b02,sur_refl_b01,sur_refl_b02',
+        agriculture: 'sur_refl_b02,sur_refl_b01,sur_refl_b02',
+      },
+    },
+    {
+      key: 'modis-vi',
+      label: 'MODIS Vegetation Index',
+      collectionId: 'MODIS/061/MOD13Q1',
+      bands: {
+        true: 'NDVI',
+        false: 'EVI',
+        swir: 'EVI',
+        agriculture: 'NDVI',
+      },
+    },
+    {
+      key: 'modis-lst',
+      label: 'MODIS Land Temp',
+      collectionId: 'MODIS/061/MOD11A2',
+      bands: {
+        true: 'LST_Day_1km',
+        false: 'LST_Night_1km',
+        swir: 'LST_Day_1km',
+        agriculture: 'LST_Day_1km',
+      },
+    },
+    {
+      key: 'modis-fire',
+      label: 'MODIS Fire',
+      collectionId: 'MODIS/061/MOD14A1',
+      bands: {
+        true: 'FireMask',
+        false: 'MaxFRP',
+        swir: 'MaxFRP',
+        agriculture: 'FireMask',
+      },
+    },
+    {
+      key: 'modis-snow',
+      label: 'MODIS Snow Cover',
+      collectionId: 'MODIS/061/MOD10A1',
+      bands: {
+        true: 'NDSI_Snow_Cover',
+        false: 'NDSI_Snow_Cover_Basic_QA',
+        swir: 'NDSI_Snow_Cover',
+        agriculture: 'NDSI_Snow_Cover',
+      },
+    },
+    {
+      key: 'modis-brdf',
+      label: 'MODIS BRDF 500m',
+      collectionId: 'MODIS/061/MCD43A4',
+      bands: {
+        true: 'Nadir_Reflectance_Band1,Nadir_Reflectance_Band4,Nadir_Reflectance_Band3',
+        false: 'Nadir_Reflectance_Band2,Nadir_Reflectance_Band1,Nadir_Reflectance_Band4',
+        swir: 'Nadir_Reflectance_Band6,Nadir_Reflectance_Band2,Nadir_Reflectance_Band1',
+        agriculture: 'Nadir_Reflectance_Band6,Nadir_Reflectance_Band2,Nadir_Reflectance_Band4',
+      },
+    },
+    {
+      key: 'night-slc',
+      label: 'Night Lights (SLC)',
+      collectionId: 'NOAA/VIIRS/DNB/MONTHLY_V1/VCMSLCFG',
+      bands: {
+        true: 'avg_rad',
+        false: 'avg_rad',
+        swir: 'avg_rad',
+        agriculture: 'avg_rad',
+      },
+    },
+    {
+      key: 'night-cf',
+      label: 'Night Lights (CF)',
+      collectionId: 'NOAA/VIIRS/DNB/MONTHLY_V1/VCMCFG',
+      bands: {
+        true: 'avg_rad',
+        false: 'avg_rad',
+        swir: 'avg_rad',
+        agriculture: 'avg_rad',
+      },
+    },
+    {
+      key: 'viirs-surf-refl',
+      label: 'VIIRS Surface Refl.',
+      collectionId: 'NOAA/VIIRS/001/VNP09GA',
+      bands: {
+        true: 'M5,M4,M3',
+        false: 'M7,M5,M4',
+        swir: 'M11,M7,M5',
+        agriculture: 'M11,M7,M4',
+      },
+    },
+    {
+      key: 'viirs-vi',
+      label: 'VIIRS Vegetation Index',
+      collectionId: 'NOAA/VIIRS/001/VNP13A1',
+      bands: {
+        true: 'NDVI',
+        false: 'EVI',
+        swir: 'EVI',
+        agriculture: 'NDVI',
+      },
+    },
+    {
+      key: 'goes-16',
+      label: 'GOES-16 (East)',
+      collectionId: 'NOAA/GOES/16/MCMIPF',
+      bands: {
+        true: 'CMI_C02,CMI_C02,CMI_C01',
+        false: 'CMI_C03,CMI_C02,CMI_C01',
+        swir: 'CMI_C13,CMI_C07,CMI_C02',
+        agriculture: 'CMI_C03,CMI_C02,CMI_C01',
+      },
+    },
+    {
+      key: 'goes-17',
+      label: 'GOES-17 (West)',
+      collectionId: 'NOAA/GOES/17/MCMIPF',
+      bands: {
+        true: 'CMI_C02,CMI_C02,CMI_C01',
+        false: 'CMI_C03,CMI_C02,CMI_C01',
+        swir: 'CMI_C13,CMI_C07,CMI_C02',
+        agriculture: 'CMI_C03,CMI_C02,CMI_C01',
+      },
+    },
+    {
+      key: 'goes-18',
+      label: 'GOES-18 (West)',
+      collectionId: 'NOAA/GOES/18/MCMIPF',
+      bands: {
+        true: 'CMI_C02,CMI_C02,CMI_C01',
+        false: 'CMI_C03,CMI_C02,CMI_C01',
+        swir: 'CMI_C13,CMI_C07,CMI_C02',
+        agriculture: 'CMI_C03,CMI_C02,CMI_C01',
+      },
+    },
+    {
+      key: 'aster-l1t',
+      label: 'ASTER L1T',
+      collectionId: 'ASTER/AST_L1T_003',
+      bands: {
+        true: 'B3N,B02,B01',
+        false: 'B3N,B02,B01',
+        swir: 'B04,B3N,B02',
+        agriculture: 'B04,B3N,B02',
+      },
+    },
+    {
+      key: 'aster-ged',
+      label: 'ASTER GED 100m',
+      collectionId: 'NASA/ASTER_GED/AG100_003',
+      bands: {
+        true: 'elevation',
+        false: 'elevation',
+        swir: 'elevation',
+        agriculture: 'elevation',
+      },
+    },
+  ];
+  const SATELLITE_BAND_PRESETS = [
+    { key: 'true', label: 'True Colour' },
+    { key: 'false', label: 'False Colour' },
+    { key: 'swir', label: 'SWIR' },
+    { key: 'agriculture', label: 'Agriculture' },
+  ];
+  const todayIsoDate = new Date().toISOString().slice(0, 10);
+
   const zoomInBtn = document.getElementById('hud-cam-zoom-in');
   const zoomOutBtn = document.getElementById('hud-cam-zoom-out');
   const resetNorthBtn = document.getElementById('hud-cam-reset-north');
@@ -848,8 +1214,10 @@ function wireCameraControlButtons(viewer) {
   const satellitePickHint = document.getElementById('satellite-pick-hint');
   const satelliteSourceInput = document.getElementById('satellite-source-input');
   const satelliteCollectionInput = document.getElementById('satellite-collection-input');
+  const satelliteBandPresetInput = document.getElementById('satellite-band-preset-input');
   const satelliteBandsInput = document.getElementById('satellite-bands-input');
   const satelliteDateInput = document.getElementById('satellite-date-input');
+  const satelliteDateState = document.getElementById('satellite-date-state');
   const satelliteLoadBtn = document.getElementById('satellite-load-btn');
   const satelliteApplyBtn = document.getElementById('satellite-apply-btn');
   const satellitePreview = document.getElementById('satellite-preview');
@@ -913,11 +1281,36 @@ function wireCameraControlButtons(viewer) {
     document.body.style.cursor = active ? 'crosshair' : '';
   }
 
+  function getSelectedCollectionPreset() {
+    if (!satelliteCollectionInput) return null;
+    return SATELLITE_COLLECTION_PRESETS.find(item => item.key === satelliteCollectionInput.value) ?? SATELLITE_COLLECTION_PRESETS[0] ?? null;
+  }
+
   function applyCollectionPreset() {
     if (!satelliteCollectionInput || !satelliteBandsInput) return;
-    const raw = satelliteCollectionInput.value;
-    const [, defaultBands] = raw.split('|');
-    if (defaultBands) satelliteBandsInput.value = defaultBands;
+    const selected = getSelectedCollectionPreset();
+    if (!selected) return;
+    const bandPresetKey = satelliteBandPresetInput?.value || 'true';
+    satelliteBandsInput.value = selected.bands[bandPresetKey] || selected.bands.true || 'B4,B3,B2';
+  }
+
+  function updateDateInputHighlight() {
+    if (!satelliteDateInput) return;
+    const selected = satelliteDateInput.value;
+    if (selected && selected > todayIsoDate) {
+      satelliteDateInput.value = todayIsoDate;
+    }
+    const effectiveSelected = satelliteDateInput.value;
+    const isCustomDate = Boolean(effectiveSelected) && effectiveSelected !== todayIsoDate;
+    satelliteDateInput.style.background = isCustomDate ? 'rgba(255,170,0,0.18)' : 'rgba(0,0,0,0.5)';
+    satelliteDateInput.style.borderColor = isCustomDate ? 'rgba(255,170,0,0.62)' : 'rgba(0,255,136,0.25)';
+    satelliteDateInput.style.color = isCustomDate ? '#ffd98a' : '#00ff88';
+    if (satelliteDateState) {
+      satelliteDateState.textContent = isCustomDate ? `Date: ${effectiveSelected}` : 'Date: Today';
+      satelliteDateState.style.background = isCustomDate ? 'rgba(255,170,0,0.16)' : 'rgba(0,255,136,0.08)';
+      satelliteDateState.style.borderColor = isCustomDate ? 'rgba(255,170,0,0.58)' : 'rgba(0,255,136,0.25)';
+      satelliteDateState.style.color = isCustomDate ? '#ffd98a' : 'rgba(0,255,136,0.9)';
+    }
   }
 
   function positionSatelliteModal() {
@@ -1050,8 +1443,8 @@ function wireCameraControlButtons(viewer) {
     satelliteApplyBtn.disabled = true;
 
     try {
-      const collectionRaw = satelliteCollectionInput?.value ?? 'COPERNICUS/S2_SR_HARMONIZED|B4,B3,B2';
-      const [collectionId] = collectionRaw.split('|');
+      const selectedCollection = getSelectedCollectionPreset();
+      const collectionId = selectedCollection?.collectionId ?? 'COPERNICUS/S2_SR_HARMONIZED';
       const bands = (satelliteBandsInput?.value ?? '').trim() || 'B4,B3,B2';
       const dateStr = satelliteDateInput.value || '';
       const source = satelliteSourceInput?.value ?? 'auto';
@@ -1150,15 +1543,36 @@ function wireCameraControlButtons(viewer) {
       e.stopPropagation();
       satelliteModal.hidden = false;
       positionSatelliteModal();
-      // Set today's date as default
-      const today = new Date().toISOString().split('T')[0];
-      if (satelliteDateInput) satelliteDateInput.value = today;
       setSatelliteStatus('');
     });
   }
 
   if (satelliteCollectionInput) {
+    satelliteCollectionInput.innerHTML = SATELLITE_COLLECTION_PRESETS
+      .map(item => `<option value="${item.key}">${item.label}</option>`)
+      .join('');
+  }
+
+  if (satelliteBandPresetInput) {
+    satelliteBandPresetInput.innerHTML = SATELLITE_BAND_PRESETS
+      .map(item => `<option value="${item.key}">${item.label}</option>`)
+      .join('');
+  }
+
+  if (satelliteCollectionInput) {
     satelliteCollectionInput.addEventListener('change', applyCollectionPreset);
+  }
+
+  if (satelliteBandPresetInput) {
+    satelliteBandPresetInput.addEventListener('change', applyCollectionPreset);
+  }
+
+  if (satelliteDateInput) {
+    satelliteDateInput.max = todayIsoDate;
+    if (!satelliteDateInput.value) satelliteDateInput.value = todayIsoDate;
+    updateDateInputHighlight();
+    satelliteDateInput.addEventListener('change', updateDateInputHighlight);
+    satelliteDateInput.addEventListener('input', updateDateInputHighlight);
   }
 
   if (satellitePickBtn) {
