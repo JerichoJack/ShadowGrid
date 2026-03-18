@@ -5,13 +5,9 @@ dist/
 .DS_Store
 *.msi
 package-lock.json
-opensky_api_credentials.json
 *.zip
 *.pdf
-flock.md
 
 # Generated camera database (rebuild with: node server/collectors/collectCameras.mjs)
 public/camera-data/
-server/cache/
 server/cache/world-snapshot-cache.json
-reference_material/

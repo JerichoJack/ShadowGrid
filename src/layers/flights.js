@@ -5,8 +5,10 @@
  * Last updated: 2026-03-13
  */
 
+
 import * as Cesium from 'cesium';
 import { setServerSnapshotLayerEnabled, subscribeServerSnapshot } from '../core/serverSnapshot.js';
+import { shapes as MARKER_SHAPES } from './markers.js';
 
 const PROVIDER = (import.meta.env.VITE_FLIGHT_PROVIDER ?? 'opensky').toLowerCase();
 const SERVER_HEAVY_MODE = (import.meta.env.VITE_SERVER_HEAVY_MODE ?? 'false').toLowerCase() === 'true';
@@ -25,141 +27,9 @@ const OPENSKY_CLIENT_SECRET = import.meta.env.VITE_OPENSKY_CLIENT_SECRET ?? '';
 //     fetches with no CORS headers. The /api/opensky-auth proxy rewrites the host.
 const OPENSKY_TOKEN_URL = '/api/opensky-auth/auth/realms/opensky-network/protocol/openid-connect/token';
 
-// ── Aircraft icon SVGs — visually distinct top-down silhouettes ───────────────
-// Each shape is clearly different at a glance. North = up (nose pointing up).
 
-const SHAPES = {
+// Use marker shapes from markers.js for aircraft SVG icons
 
-  // HEAVY — wide double-deck fuselage, 4 engines under very wide swept wings
-  // Represents: B747, B748, A380, A340, B777 (large widebody)
-  heavy: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="36" height="36">
-    <g transform="translate(50,50)" fill="FILL" stroke="STROKE" stroke-width="1.2" stroke-linejoin="round">
-      <!-- Fuselage — fat & long -->
-      <ellipse cx="0" cy="-2" rx="5.5" ry="34" />
-      <!-- Wide swept wings -->
-      <path d="M-5,-8 L-44,18 L-42,24 L-5,10 Z"/>
-      <path d="M5,-8 L44,18 L42,24 L5,10 Z"/>
-      <!-- Inner engine pods under wings -->
-      <ellipse cx="-22" cy="10" rx="4.5" ry="8" transform="rotate(-18,-22,10)"/>
-      <ellipse cx="22" cy="10" rx="4.5" ry="8" transform="rotate(18,22,10)"/>
-      <!-- Outer engine pods -->
-      <ellipse cx="-34" cy="17" rx="3.5" ry="7" transform="rotate(-18,-34,17)"/>
-      <ellipse cx="34" cy="17" rx="3.5" ry="7" transform="rotate(18,34,17)"/>
-      <!-- Horizontal stabilisers -->
-      <path d="M-4,28 L-22,38 L-21,42 L-4,34 Z"/>
-      <path d="M4,28 L22,38 L21,42 L4,34 Z"/>
-      <!-- Vertical tail (spine line) -->
-      <line x1="0" y1="26" x2="0" y2="36" stroke-width="2.5"/>
-    </g>
-  </svg>`,
-
-  // WIDEBODY — 2-engine widebody, moderately swept wings
-  // Represents: B767, B787, A300, A330, A350
-  widebody: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="32" height="32">
-    <g transform="translate(50,50)" fill="FILL" stroke="STROKE" stroke-width="1.2" stroke-linejoin="round">
-      <!-- Fuselage — medium-fat -->
-      <ellipse cx="0" cy="-2" rx="4.5" ry="32"/>
-      <!-- Swept wings, wider chord -->
-      <path d="M-4.5,-6 L-40,16 L-38,22 L-4.5,8 Z"/>
-      <path d="M4.5,-6 L40,16 L38,22 L4.5,8 Z"/>
-      <!-- Engine pods, 1 per wing -->
-      <ellipse cx="-26" cy="10" rx="4" ry="8" transform="rotate(-16,-26,10)"/>
-      <ellipse cx="26" cy="10" rx="4" ry="8" transform="rotate(16,26,10)"/>
-      <!-- Horizontal stabs -->
-      <path d="M-4,26 L-20,36 L-19,40 L-4,31 Z"/>
-      <path d="M4,26 L20,36 L19,40 L4,31 Z"/>
-      <line x1="0" y1="25" x2="0" y2="34" stroke-width="2.5"/>
-    </g>
-  </svg>`,
-
-  // JET — narrow-body, 2 engines under moderately swept wings
-  // Represents: B737, A320, B757, E190 etc. — the most common type
-  jet: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="28" height="28">
-    <g transform="translate(50,50)" fill="FILL" stroke="STROKE" stroke-width="1.2" stroke-linejoin="round">
-      <!-- Fuselage — slim -->
-      <ellipse cx="0" cy="-2" rx="3.5" ry="30"/>
-      <!-- Wings — swept, medium span -->
-      <path d="M-3.5,-4 L-32,14 L-30,20 L-3.5,7 Z"/>
-      <path d="M3.5,-4 L32,14 L30,20 L3.5,7 Z"/>
-      <!-- Engine pods under wings -->
-      <ellipse cx="-20" cy="8" rx="3.2" ry="7" transform="rotate(-14,-20,8)"/>
-      <ellipse cx="20" cy="8" rx="3.2" ry="7" transform="rotate(14,20,8)"/>
-      <!-- Stabilisers -->
-      <path d="M-3,24 L-16,32 L-15,36 L-3,29 Z"/>
-      <path d="M3,24 L16,32 L15,36 L3,29 Z"/>
-      <line x1="0" y1="23" x2="0" y2="31" stroke-width="2.5"/>
-    </g>
-  </svg>`,
-
-  // TURBOPROP — short fuselage, straight high wings, prominent circular prop discs
-  // Represents: ATR-42/72, Dash-8, King Air, Saab 340
-  turboprop: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="28" height="28">
-    <g transform="translate(50,50)" fill="FILL" stroke="STROKE" stroke-width="1.2" stroke-linejoin="round">
-      <!-- Fuselage — stubby -->
-      <ellipse cx="0" cy="2" rx="4" ry="24"/>
-      <!-- High straight wings — wider chord, less sweep -->
-      <path d="M-4,-4 L-32,2 L-32,10 L-4,6 Z"/>
-      <path d="M4,-4 L32,2 L32,10 L4,6 Z"/>
-      <!-- Prop disc rings (the key visual differentiator!) -->
-      <circle cx="-26" cy="4" r="8" fill="none" stroke="STROKE" stroke-width="1.5" opacity="0.8"/>
-      <circle cx="26" cy="4" r="8" fill="none" stroke="STROKE" stroke-width="1.5" opacity="0.8"/>
-      <!-- Prop cross hairs -->
-      <line x1="-26" y1="-4" x2="-26" y2="12" stroke-width="1"/>
-      <line x1="-34" y1="4" x2="-18" y2="4" stroke-width="1"/>
-      <line x1="26" y1="-4" x2="26" y2="12" stroke-width="1"/>
-      <line x1="18" y1="4" x2="34" y2="4" stroke-width="1"/>
-      <!-- Small stabs -->
-      <path d="M-3,18 L-14,24 L-13,27 L-3,22 Z"/>
-      <path d="M3,18 L14,24 L13,27 L3,22 Z"/>
-    </g>
-  </svg>`,
-
-  // HELICOPTER — distinctive rotor disc + elongated tail boom
-  helicopter: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="30" height="30">
-    <g transform="translate(50,50)" fill="FILL" stroke="STROKE" stroke-width="1.2" stroke-linejoin="round">
-      <!-- Fuselage pod — fat oval -->
-      <ellipse cx="0" cy="0" rx="10" ry="15"/>
-      <!-- Main rotor disc — large circle, no fill -->
-      <circle cx="0" cy="-2" r="30" fill="none" stroke="STROKE" stroke-width="1.5" opacity="0.6"/>
-      <!-- Rotor blades cross -->
-      <line x1="-30" y1="-2" x2="30" y2="-2" stroke-width="2" opacity="0.8"/>
-      <line x1="0" y1="-32" x2="0" y2="28" stroke-width="2" opacity="0.8"/>
-      <!-- Tail boom -->
-      <rect x="-2" y="15" width="4" height="20" rx="1"/>
-      <!-- Tail rotor -->
-      <line x1="-8" y1="34" x2="8" y2="34" stroke-width="2.5"/>
-    </g>
-  </svg>`,
-
-  // LIGHT — tiny high-wing piston, very short & stubby, straight wings
-  // Represents: Cessna 172, Piper, Diamond etc.
-  light: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="22" height="22">
-    <g transform="translate(50,50)" fill="FILL" stroke="STROKE" stroke-width="1.3" stroke-linejoin="round">
-      <!-- Fuselage — very stubby -->
-      <ellipse cx="0" cy="2" rx="3" ry="18"/>
-      <!-- Straight high wings — long span, thin chord -->
-      <path d="M-3,-2 L-34,0 L-34,5 L-3,3 Z"/>
-      <path d="M3,-2 L34,0 L34,5 L3,3 Z"/>
-      <!-- Single prop disc -->
-      <circle cx="0" cy="-18" r="6" fill="none" stroke="STROKE" stroke-width="1.5" opacity="0.8"/>
-      <!-- Tiny V-tail -->
-      <path d="M-2,14 L-12,20 L-11,23 L-2,17 Z"/>
-      <path d="M2,14 L12,20 L11,23 L2,17 Z"/>
-    </g>
-  </svg>`,
-
-  // GENERIC — simple arrow for anything unclassified
-  generic: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="24" height="24">
-    <g transform="translate(50,50)" fill="FILL" stroke="STROKE" stroke-width="1.2" stroke-linejoin="round">
-      <ellipse cx="0" cy="-2" rx="3.5" ry="28"/>
-      <path d="M-3.5,-2 L-28,14 L-26,20 L-3.5,8 Z"/>
-      <path d="M3.5,-2 L28,14 L26,20 L3.5,8 Z"/>
-      <path d="M-3,22 L-14,30 L-13,33 L-3,26 Z"/>
-      <path d="M3,22 L14,30 L13,33 L3,26 Z"/>
-      <line x1="0" y1="21" x2="0" y2="30" stroke-width="2"/>
-    </g>
-  </svg>`,
-};
 
 // ── Type-code → shape lookup ──────────────────────────────────────────────────
 // adsb.fi provides the "t" field (ICAO type designator e.g. "B738", "A320")
@@ -381,27 +251,14 @@ function altitudeColor(altFt) { return '#00e676'; } // stub — no longer used f
 
 // ── Shape selection — type code first, then ADS-B category, then altitude ─────
 
-function getShape(a) {
-  // 1. Type code (most reliable — adsb.fi "t" field stored as a.typecode)
-  const tc = (a.typecode ?? '').toUpperCase().trim();
-  if (tc) {
-    if (TYPE_HELICOPTER.has(tc))  return 'helicopter';
-    if (TYPE_HEAVY.has(tc))       return 'heavy';
-    if (TYPE_WIDEBODY.has(tc))    return 'widebody';
-    if (TYPE_TURBOPROP.has(tc))   return 'turboprop';
-    if (TYPE_LIGHT.has(tc))       return 'light';
-    // Regex catch-alls for type codes not in explicit sets
-    // H prefix = helicopter (H60, H47, H53, H64, H72, H1, H2 etc.)
-    if (/^H\d/.test(tc))                   return 'helicopter';
-    // S prefix rotorcraft (S61, S76, S92 — Sikorsky)
-    if (/^S(6|7|9)\d/.test(tc))            return 'helicopter';
-    if (/^(EC|BO|BK|AS|AW|MD9)/.test(tc))  return 'helicopter';
-    if (/^(B74|B77|A38|A34)/.test(tc))     return 'heavy';
-    if (/^(B76|B78|A3[03]|A35)/.test(tc))  return 'widebody';
-    if (/^(B7|A3|E1|E17|E19|C90|RJ|T3|F\d|MIG|SU\d)/.test(tc)) return 'jet';
-  }
 
-  // 2. ADS-B category byte
+// New shape selection using markers.js shapes
+function getShape(a) {
+  // ICAO-aware: try exact typecode match first
+  const tc = (a.typecode ?? '').toLowerCase();
+  if (tc && MARKER_SHAPES[tc]) return tc;
+
+  // Category-driven fallback
   const cat = (a.category ?? '').toUpperCase();
   if (cat === 'A7' || cat === 'B7')  return 'helicopter';
   if (cat === 'A5')                  return 'heavy';
@@ -410,11 +267,7 @@ function getShape(a) {
   if (cat === 'A1')                  return 'light';
   if (cat === 'A2')                  return 'turboprop';
 
-  // 3. Altitude proxy (last resort)
-  const alt = a.altFt ?? 0;
-  if (alt > 25000) return 'jet';
-  if (alt > 5000)  return 'turboprop';
-  if (alt > 0)     return 'light';
+  // Fallback to generic
   return 'generic';
 }
 
@@ -429,35 +282,24 @@ function glowColor(fillColor) {
   return dark.includes(fillColor) ? 'rgba(255,255,255,0.9)' : 'rgba(0,0,0,0.95)';
 }
 
+
+// Build SVG URI using markers.js silhouette paths
 function buildSvgUri(shape, color) {
   const key = `${shape}:${color}`;
   if (svgCache.has(key)) return svgCache.get(key);
 
-  const glow   = glowColor(color);
-  const rawSvg = SHAPES[shape] ?? SHAPES.generic;
+  const glow = glowColor(color);
+  const marker = MARKER_SHAPES[shape] || MARKER_SHAPES['generic'];
+  const path = marker.path;
+  const vb = marker.viewBox || '0 0 100 100';
+  const w = marker.w || 32;
+  const h = marker.h || 32;
 
-  // Extract just the transform from the original <g> tag — strip fill/stroke placeholders
-  const gTagMatch = rawSvg.match(/<g([^>]*)>/);
-  const rawAttribs = gTagMatch ? gTagMatch[1] : ' transform="translate(50,50)"';
-  // Keep only the transform attribute, discard fill/stroke/stroke-width from template
-  const xformMatch = rawAttribs.match(/transform="([^"]+)"/);
-  const xform      = xformMatch ? ` transform="${xformMatch[1]}"` : '';
-
-  const innerMatch = rawSvg.match(/<g[^>]*>([\s\S]*?)<\/g>/);
-  const inner      = innerMatch ? innerMatch[1] : '';
-
-  const vb = (rawSvg.match(/viewBox="([^"]+)"/) || [])[1] || '0 0 100 100';
-  const w  = 320;
-  const h  = 320;
-
-  // Two clean paint passes sharing only the transform:
-  //   Pass 1 — wide glow stroke, no fill (drawn behind)
-  //   Pass 2 — filled shape with thin stroke (drawn on top)
+  // Two paint passes: glow stroke, then filled shape
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${vb}" width="${w}" height="${h}">
-  <g${xform} fill="none" stroke="${glow}" stroke-width="5" stroke-linejoin="round" stroke-linecap="round">${inner}</g>
-  <g${xform} fill="${color}" stroke="${glow}" stroke-width="1" stroke-linejoin="round">${inner}</g>
-</svg>`;
-
+    <path d="${path}" fill="none" stroke="${glow}" stroke-width="5" stroke-linejoin="round" stroke-linecap="round" />
+    <path d="${path}" fill="${color}" stroke="${glow}" stroke-width="1" stroke-linejoin="round" />
+  </svg>`;
   const uri = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
   svgCache.set(key, uri);
   return uri;
