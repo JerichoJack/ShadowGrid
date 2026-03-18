@@ -2888,7 +2888,9 @@ function buildGlowSvgUri(shape, color) {
   const glowCol  = getContrastingGlowColor(color);
   const shapeDef = SHAPES[shape] ?? SHAPES.unknown;
   const vb       = shapeDef.viewBox ?? '0 0 32 32';
-  const w = 320, h = 320;
+  // Use ICON_SIZE_PX for per-shape icon size, fallback to 32 if not found
+  const iconSize = ICON_SIZE_PX[shape] || 32;
+  const w = iconSize, h = iconSize;
 
   // Determine viewBox centre for pulsing ring positioning
   const vbParts = vb.split(/[\s,]+/).map(Number);
