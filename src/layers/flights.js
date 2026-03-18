@@ -18,7 +18,7 @@ function loadAircraftDatabase() {
     download: true,
     header: true,
     skipEmptyLines: true,
-    worker: true,
+    // worker: true,
     step: function(row) {
       // Adjust these field names to match your CSV columns
       const r = row.data;
