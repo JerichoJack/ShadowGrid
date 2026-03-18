@@ -201,6 +201,38 @@ const SHAPES = {
 const _ulac = ['cessna', 0.92];
 
 const TypeDesignatorIcons = {
+    // ── Additional mappings from live sources (ADSB.lol, OpenSky, Airplanes.Live) ──
+    'BE65': ['twin_large', 0.92],   // Beechcraft 65 Queen Air
+    'P28A': ['cessna', 0.96],       // Piper PA-28 Cherokee
+    'C82R': ['cessna', 0.98],       // Cessna 182 Skylane (variant)
+    'B429': ['helicopter', 0.90],   // Bell 429 GlobalRanger
+    'C700': ['jet_swept', 0.92],    // Cessna Citation Longitude
+    'B65':  ['twin_large', 0.92],   // Beechcraft 65 (variant)
+    'GLF5': ['jet_swept', 0.98],    // Gulfstream G-V
+    'GLF4': ['jet_swept', 0.96],    // Gulfstream G-IV
+    'B407': ['helicopter', 0.90],   // Bell 407
+    'C25B': ['jet_nonswept', 1],    // Cessna Citation CJ3
+    'C56X': ['jet_nonswept', 1],    // Cessna Citation Excel
+    'SR22': ['cessna', 0.98],       // Cirrus SR22
+    'SF50': ['jet_nonswept', 0.94], // Cirrus Vision SF50
+    'E75L': ['airliner', 0.82],     // Embraer 175 (long)
+    'E75S': ['airliner', 0.82],     // Embraer 175 (short)
+    'B39M': ['b738', 1.00],         // Boeing 737 MAX 9
+    'B38M': ['b738', 1.00],         // Boeing 737 MAX 8
+    'B763': ['heavy_2e', 0.95],     // Boeing 767-300
+    'B772': ['heavy_2e', 1.00],     // Boeing 777-200
+    'B77W': ['heavy_2e', 1.04],     // Boeing 777-300ER
+    'CRJ9': ['jet_swept', 0.96],    // Bombardier CRJ900
+    'CRJ7': ['jet_swept', 0.94],    // Bombardier CRJ700
+    'E145': ['jet_swept', 0.92],    // Embraer ERJ145
+    'E170': ['airliner', 0.82],     // Embraer 170
+    'A321': ['a321', 1],            // Airbus A321
+    'A320': ['a320', 1],            // Airbus A320
+    'A319': ['a319', 1],            // Airbus A319
+    'C172': ['cessna', 0.96],       // Cessna 172
+    'SR20': ['cessna', 0.96],       // Cirrus SR20
+    'PA28': ['cessna', 0.96],       // Piper PA-28
+    'GL7T': ['jet_swept', 1],       // Gulfstream G650
   // ── A320 family ──────────────────────────────────────────────────────────
   'A318': ['a319', 0.95], 'A319': ['a319', 1], 'A19N': ['a319', 1],
   'A320': ['a320', 1],    'A20N': ['a320', 1],
@@ -321,7 +353,8 @@ const TypeDesignatorIcons = {
   'DRON': ['uav', 1], 'Q1':   ['uav', 1], 'Q4':   ['uav', 1],
   'Q9':   ['uav', 1], 'Q25':  ['uav', 1], 'HRON': ['uav', 1],
   // ── Helicopter — heavy ────────────────────────────────────────────────────
-  'H60':  ['helicopter', 1],  'S92':  ['helicopter', 1],
+  'H60':  ['helicopter', 1],  // Sikorsky UH-60 Black Hawk
+  'S92':  ['helicopter', 1],
   'NH90': ['helicopter', 1],  'H53':  ['helicopter', 1.1],
   'H53S': ['helicopter', 1.1],'CH47': ['helicopter', 1.05],
   'H47':  ['helicopter', 1.05],'H46': ['helicopter', 1.0],
