@@ -3,8 +3,8 @@
 
 import fs from 'fs';
 import path from 'path';
-import csvParse from 'csv-parse/sync';
-import csvStringify from 'csv-stringify/sync';
+import { parse as csvParse } from 'csv-parse/sync';
+import { stringify as csvStringify } from 'csv-stringify/sync';
 
 const DB_PATH = path.resolve(__dirname, '../public/aircraft-database-files/aircraftDatabase.csv');
 
@@ -18,7 +18,7 @@ export function upsertAircraftRecord(info) {
   let headers = ['icao24','registration','typecode','manufacturer','model','operator','country'];
   if (fs.existsSync(DB_PATH)) {
     const csv = fs.readFileSync(DB_PATH, 'utf8');
-    rows = csvParse.parse(csv, { columns: true, skip_empty_lines: true });
+    rows = csvParse(csv, { columns: true, skip_empty_lines: true });
     if (rows.length && Object.keys(rows[0]).length > headers.length) {
       headers = Object.keys(rows[0]);
     }
@@ -30,6 +30,6 @@ export function upsertAircraftRecord(info) {
   for (const h of headers) newRow[h] = info[h] || '';
   rows.push(newRow);
   // Write back to CSV
-  const csvOut = csvStringify.stringify(rows, { header: true, columns: headers });
+  const csvOut = csvStringify(rows, { header: true, columns: headers });
   fs.writeFileSync(DB_PATH, csvOut, 'utf8');
 }
