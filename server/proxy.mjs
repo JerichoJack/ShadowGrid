@@ -4711,6 +4711,12 @@ const server = http.createServer(async (req, res) => {
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
 
+  // Parse URL and query
+  const [path, qs] = req.url.split('?');
+  const queryParams = new URLSearchParams(qs ?? '');
+  const query = Object.fromEntries(queryParams);
+  const url = path.replace(/\/$/, '');
+
   // Aircraft DB API endpoint
   if (req.method === 'POST' && url === '/api/aircraftdb') {
     let body = '';
