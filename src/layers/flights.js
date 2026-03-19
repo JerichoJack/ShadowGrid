@@ -1540,7 +1540,8 @@ function classifyAircraft(a) {
     if (isLikelyCommercialCallsign(cs)) return 'commercial';
   }
 
-  return 'commercial';
+  // If not commercial, military, emergency, or ground, classify as 'other'
+  return 'other';
 }
 
 function classificationColor(classification) {
@@ -2022,6 +2023,7 @@ const FLIGHT_ZONE_AGE_RULES = { fadeMs: 6 * 60 * 60 * 1000, expireMs: 48 * 60 * 
 const aircraftClassificationFilters = {
   commercial: true,
   military: true,
+  other: true,
   emergency: true,
   ground: true,
 };
