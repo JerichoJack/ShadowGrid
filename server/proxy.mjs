@@ -4862,6 +4862,7 @@ const server = http.createServer(async (req, res) => {
         internetBlackouts: payload.internetBlackouts,
         cacheHit: payload.cacheHit,
       }));
+      return;
     } catch (err) {
       console.error('[proxy] /api/internet error:', err);
       res.writeHead(502);
