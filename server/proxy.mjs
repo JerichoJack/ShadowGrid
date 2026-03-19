@@ -4510,20 +4510,31 @@ function upsert(aircraft) {
     if (a.alt_baro === 'ground' || (a.alt_baro ?? 0) <= 100) continue;
     enrichAircraftFromDb(a);
     db.set(id, {
-      hex:      id,
-      flight:   (a.flight ?? a.r ?? '').trim(),
-      lat:      a.lat,
-      lon:      a.lon,
-      alt_baro: a.alt_baro ?? a.alt_geom ?? 10000,
-      track:    a.track ?? 0,
-      gs:       a.gs ?? 0,
+      hex:        id,
+      flight:     (a.flight ?? a.r ?? '').trim(),
+      lat:        a.lat,
+      lon:        a.lon,
+      alt_baro:   a.alt_baro ?? a.alt_geom ?? 10000,
+      track:      a.track ?? 0,
+      gs:         a.gs ?? 0,
       // enrichment fields — used for icon shape, color classification, HUD panel
-      t:        a.t        ?? '',       // ICAO type code e.g. "H60", "B738", "A320"
-      category: a.category ?? '',       // ADS-B category byte e.g. "A7" = rotorcraft
-      dbFlags:  a.dbFlags  ?? 0,        // bit 0 = military
-      squawk:   a.squawk   ?? '',
-      baro_rate: a.baro_rate ?? a.geom_rate ?? 0,
-      _seen:    now,
+      t:          a.t        ?? '',       // ICAO type code e.g. "H60", "B738", "A320"
+      category:   a.category ?? '',       // ADS-B category byte e.g. "A7" = rotorcraft
+      dbFlags:    a.dbFlags  ?? 0,        // bit 0 = military
+      squawk:     a.squawk   ?? '',
+      baro_rate:  a.baro_rate ?? a.geom_rate ?? 0,
+      icon:       a.icon ?? '',           // <-- enriched SVG icon shape name
+      iconScale:  typeof a.iconScale === 'number' ? a.iconScale : 1, // <-- enriched SVG icon scale
+      // Optionally include other enrichment fields as needed by client
+      typecode:   a.typecode ?? '',
+      manufacturer: a.manufacturer ?? '',
+      model:      a.model ?? '',
+      wtc:        a.wtc ?? '',
+      typeDescription: a.typeDescription ?? '',
+      engineCount: a.engineCount ?? '',
+      engineType:  a.engineType ?? '',
+      modelFullName: a.modelFullName ?? '',
+      _seen:      now,
     });
   }
 }
