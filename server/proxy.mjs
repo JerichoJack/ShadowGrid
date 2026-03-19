@@ -26,6 +26,98 @@ import * as satellite from 'satellite.js';
 import { cellToBoundary } from 'h3-js';
 import { feature as topojsonFeature } from 'topojson-client';
 
+// ── Aircraft DB (server-side enrichment) ──
+import csvParse from 'csv-parse/sync';
+
+const AIRCRAFT_CSV_PATHS = [
+  path.resolve(process.cwd(), 'public', 'aircraft-database-files', 'aircraftDatabase.csv'),
+  path.resolve(process.cwd(), 'public', 'aircraft-database-files', 'aircraftTypes.csv'),
+  path.resolve(process.cwd(), 'public', 'aircraft-database-files', 'manufacturers.csv'),
+];
+
+const aircraftDb = {};
+const typeDb = {};
+const manufacturerDb = {};
+
+function loadAircraftDatabaseSync() {
+  // aircraftDatabase.csv (by icao24)
+  try {
+    const csv1 = fs.readFileSync(AIRCRAFT_CSV_PATHS[0], 'utf8');
+    const rows1 = csvParse.parse(csv1, { columns: true, skip_empty_lines: true });
+    for (const r of rows1) {
+      const icao24 = (r.icao24 || r.ICAO24 || r.hex || '').toLowerCase();
+      if (!icao24) continue;
+      aircraftDb[icao24] = {
+        typecode: r.typecode || r.Typecode || r.type || '',
+        manufacturer: r.manufacturer || r.Manufacturer || '',
+        model: r.model || r.Model || '',
+        category: r.category || r.Category || '',
+      };
+    }
+  } catch (err) {
+    console.warn('[AircraftDB] Failed to load aircraftDatabase.csv:', err.message);
+  }
+  // aircraftTypes.csv (by typecode)
+  try {
+    const csv2 = fs.readFileSync(AIRCRAFT_CSV_PATHS[1], 'utf8');
+    const rows2 = csvParse.parse(csv2, { columns: true, skip_empty_lines: true });
+    for (const r of rows2) {
+      const typecode = (r.Designator || r.typecode || r.Typecode || r.type || '').toUpperCase();
+      if (!typecode) continue;
+      typeDb[typecode] = {
+        description: r.Description || r.AircraftDescription || '',
+        engineCount: r.EngineCount || '',
+        engineType: r.EngineType || '',
+        manufacturerCode: r.ManufacturerCode || '',
+        modelFullName: r.ModelFullName || '',
+        wtc: r.WTC || '',
+      };
+    }
+  } catch (err) {
+    console.warn('[AircraftDB] Failed to load aircraftTypes.csv:', err.message);
+  }
+  // manufacturers.csv (by code)
+  try {
+    const csv3 = fs.readFileSync(AIRCRAFT_CSV_PATHS[2], 'utf8');
+    const rows3 = csvParse.parse(csv3, { columns: true, skip_empty_lines: true });
+    for (const r of rows3) {
+      const code = (r.Code || '').toUpperCase();
+      if (!code) continue;
+      manufacturerDb[code] = r.Name || '';
+    }
+  } catch (err) {
+    console.warn('[AircraftDB] Failed to load manufacturers.csv:', err.message);
+  }
+  console.log('[AircraftDB] Loaded', Object.keys(aircraftDb).length, 'aircraft,', Object.keys(typeDb).length, 'types,', Object.keys(manufacturerDb).length, 'manufacturers');
+}
+
+function enrichAircraftFromDb(a) {
+  const icao24 = (a.icao24 ?? a.hex ?? '').toLowerCase();
+  if (!icao24) return;
+  const db = aircraftDb[icao24];
+  if (db) {
+    if (!a.typecode && db.typecode) a.typecode = db.typecode;
+    if (!a.manufacturer && db.manufacturer) a.manufacturer = db.manufacturer;
+    if (!a.model && db.model) a.model = db.model;
+    if (!a.category && db.category) a.category = db.category;
+  }
+  const typecode = (a.typecode || '').toUpperCase();
+  const typeInfo = typeDb[typecode];
+  if (typeInfo) {
+    if (!a.engineCount && typeInfo.engineCount) a.engineCount = typeInfo.engineCount;
+    if (!a.engineType && typeInfo.engineType) a.engineType = typeInfo.engineType;
+    if (!a.modelFullName && typeInfo.modelFullName) a.modelFullName = typeInfo.modelFullName;
+    if (!a.wtc && typeInfo.wtc) a.wtc = typeInfo.wtc;
+    if (!a.typeDescription && typeInfo.description) a.typeDescription = typeInfo.description;
+    if (!a.manufacturerCode && typeInfo.manufacturerCode) a.manufacturerCode = typeInfo.manufacturerCode;
+  }
+  const mcode = (a.manufacturerCode || '').toUpperCase();
+  if (mcode && manufacturerDb[mcode] && !a.manufacturer) a.manufacturer = manufacturerDb[mcode];
+}
+
+// Load on startup
+loadAircraftDatabaseSync();
+
 const PORT       = 3001;
 const RADIUS_NM  = 250;
 const RADIUS_DEG = RADIUS_NM / 60;   // ~4.17 degrees
@@ -3067,6 +3159,7 @@ function upsert(aircraft) {
     const id = (a.hex ?? '').toLowerCase().trim();
     if (!id || !a.lat || !a.lon) continue;
     if (a.alt_baro === 'ground' || (a.alt_baro ?? 0) <= 100) continue;
+    enrichAircraftFromDb(a);
     db.set(id, {
       hex:      id,
       flight:   (a.flight ?? a.r ?? '').trim(),
