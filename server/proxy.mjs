@@ -1360,19 +1360,108 @@ function enrichAircraftFromDb(a) {
   const mcode = (a.manufacturerCode || '').toUpperCase();
   if (mcode && manufacturerDb[mcode] && !a.manufacturer) a.manufacturer = manufacturerDb[mcode];
 
-  // --- Icon/Scale enrichment ---
+  // --- Icon/Scale enrichment (mirrors client fallback logic) ---
+  // 1. Exact type designator match
   let iconEntry = typeDesignatorIcons[typecode];
   if (iconEntry) {
     a.icon = iconEntry[0];
     a.iconScale = iconEntry[1];
-  } else if (a.typeDescription && TypeDescriptionIcons[a.typeDescription]) {
-    const descEntry = TypeDescriptionIcons[a.typeDescription];
-    a.icon = descEntry[0];
-    a.iconScale = descEntry[1];
-  } else {
-    a.icon = DEFAULT_ICON;
-    a.iconScale = DEFAULT_ICON_SCALE;
+    return;
   }
+
+  // 2–4. typeDescription fallback (with WTC, then without, then by first letter)
+  const td = (a.typeDescription || '').toUpperCase().trim();
+  const wtc = (a.wtc || '').toUpperCase().trim();
+  if (td.length === 3) {
+    // 2. With WTC suffix e.g. "L2J-M"
+    if (wtc.length === 1) {
+      const key5 = td + '-' + wtc;
+      if (key5 === 'L2J-M' && a.category && a.category.toUpperCase() === 'A2') {
+        a.icon = 'jet_swept';
+        a.iconScale = 1;
+        return;
+      }
+      if (TypeDescriptionIcons[key5]) {
+        const entry = TypeDescriptionIcons[key5];
+        a.icon = entry[0];
+        a.iconScale = entry[1];
+        return;
+      }
+    }
+    // 3. Without WTC
+    if (TypeDescriptionIcons[td]) {
+      const entry = TypeDescriptionIcons[td];
+      a.icon = entry[0];
+      a.iconScale = entry[1];
+      return;
+    }
+    // 4. Basic type letter only
+    const basicType = td.charAt(0);
+    if (TypeDescriptionIcons[basicType]) {
+      const entry = TypeDescriptionIcons[basicType];
+      a.icon = entry[0];
+      a.iconScale = entry[1];
+      return;
+    }
+  } else if (td.length === 1 && TypeDescriptionIcons[td]) {
+    const entry = TypeDescriptionIcons[td];
+    a.icon = entry[0];
+    a.iconScale = entry[1];
+    return;
+  }
+
+  // 5. ADS-B category
+  const cat = (a.category || '').toUpperCase().trim();
+  if (cat && CategoryIcons[cat]) {
+    const entry = CategoryIcons[cat];
+    a.icon = entry[0];
+    a.iconScale = entry[1];
+    return;
+  }
+
+  // Regex catch-alls for common type-code patterns not in explicit tables
+  if (typecode) {
+    if (/^H\d/.test(typecode) || /^S(6|7|9)\d/.test(typecode) || /^(EC|BO|BK|AS|AW|MD9)/.test(typecode)) {
+      a.icon = 'helicopter';
+      a.iconScale = 1;
+      return;
+    }
+    if (/^(B74|B77|A38|A34)/.test(typecode)) {
+      a.icon = 'heavy_4e';
+      a.iconScale = 1;
+      return;
+    }
+    if (/^(B76|B78|A3[03]|A35)/.test(typecode)) {
+      a.icon = 'heavy_2e';
+      a.iconScale = 1;
+      return;
+    }
+    if (/^(B7|A3|E1|E17|E19|CRJ|RJ|F\d)/.test(typecode)) {
+      a.icon = 'airliner';
+      a.iconScale = 1;
+      return;
+    }
+  }
+
+  // 6. Altitude proxy (absolute last resort)
+  const alt = a.altFt ?? 0;
+  if (alt > 25000) {
+    a.icon = 'airliner';
+    a.iconScale = 1;
+    return;
+  }
+  if (alt > 5000) {
+    a.icon = 'twin_large';
+    a.iconScale = 1;
+    return;
+  }
+  if (alt > 0) {
+    a.icon = 'cessna';
+    a.iconScale = 1;
+    return;
+  }
+  a.icon = 'unknown';
+  a.iconScale = 1;
 }
 
 // Load on startup
