@@ -145,7 +145,7 @@ import { setServerSnapshotLayerEnabled, subscribeServerSnapshot } from '../core/
 const PROVIDER = (import.meta.env.VITE_FLIGHT_PROVIDER ?? 'opensky').toLowerCase();
 const SERVER_HEAVY_MODE = (import.meta.env.VITE_SERVER_HEAVY_MODE ?? 'false').toLowerCase() === 'true';
 const ACTIVE_PROVIDER = SERVER_HEAVY_MODE ? 'proxy' : PROVIDER;
-const POLL_MS  = 10_000;
+const POLL_MS  = 22_000;
 const PROXY_URL = '/api/localproxy/api/flights';
 const NOFLY_GPS_URL = '/api/localproxy/api/nofly_gps';
 const NOFLY_GPS_POLL_MS = 5 * 60_000;

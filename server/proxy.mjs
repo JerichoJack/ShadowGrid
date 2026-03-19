@@ -1562,7 +1562,20 @@ async function getOpenSkyTokenServer() {
   return openSkyToken;
 }
 
+// Throttle OpenSky API requests to at most 1 per 22 seconds (4000/day)
+const OPENSKY_MIN_INTERVAL_MS = 22_000;
+let lastOpenSkyFetchTs = 0;
+
 async function fetchOpenSkyProvider() {
+  const now = Date.now();
+  const sinceLast = now - lastOpenSkyFetchTs;
+  if (sinceLast < OPENSKY_MIN_INTERVAL_MS) {
+    const waitMs = OPENSKY_MIN_INTERVAL_MS - sinceLast;
+    console.warn(`[proxy] OpenSky API throttled: waiting ${waitMs}ms to respect 4000/day limit`);
+    await sleep(waitMs);
+  }
+  lastOpenSkyFetchTs = Date.now();
+
   const token = await getOpenSkyTokenServer();
   const headers = token ? { Authorization: `Bearer ${token}`, ...HEADERS } : HEADERS;
   const resp = await fetch('https://opensky-network.org/api/states/all', {
@@ -1849,10 +1862,42 @@ async function ensureSatelliteCatalog() {
     satCatalogSource = 'celestrak';
   }
 
+  // Space-Track API rate limiting: <30/minute, <300/hour
+  const SPACETRACK_MIN_INTERVAL_MS = 2100; // 2.1s between requests
+  const SPACETRACK_MAX_PER_HOUR = 300;
+  let lastSpaceTrackFetchTs = globalThis.__lastSpaceTrackFetchTs || 0;
+  let spaceTrackFetchTimestamps = globalThis.__spaceTrackFetchTimestamps || [];
+
   async function loadFromSpaceTrack() {
     if (!SPACETRACK_USER || !SPACETRACK_PASS) {
       throw new Error('Space-Track credentials missing');
     }
+
+    // Throttle: enforce at least 2.1s between requests
+    const now = Date.now();
+    const sinceLast = now - lastSpaceTrackFetchTs;
+    if (sinceLast < SPACETRACK_MIN_INTERVAL_MS) {
+      const waitMs = SPACETRACK_MIN_INTERVAL_MS - sinceLast;
+      console.warn(`[proxy] Space-Track API throttled: waiting ${waitMs}ms to respect <30/minute limit`);
+      await sleep(waitMs);
+    }
+
+    // Throttle: enforce max 300 requests/hour (rolling window)
+    const oneHourAgo = now - 3600_000;
+    spaceTrackFetchTimestamps = spaceTrackFetchTimestamps.filter(ts => ts > oneHourAgo);
+    if (spaceTrackFetchTimestamps.length >= SPACETRACK_MAX_PER_HOUR) {
+      const waitMs = spaceTrackFetchTimestamps[0] + 3600_000 - now + 100;
+      console.warn(`[proxy] Space-Track API throttled: waiting ${waitMs}ms to respect <300/hour limit`);
+      await sleep(waitMs);
+      // After waiting, re-filter timestamps
+      const newNow = Date.now();
+      spaceTrackFetchTimestamps = spaceTrackFetchTimestamps.filter(ts => ts > newNow - 3600_000);
+    }
+
+    lastSpaceTrackFetchTs = Date.now();
+    spaceTrackFetchTimestamps.push(lastSpaceTrackFetchTs);
+    globalThis.__lastSpaceTrackFetchTs = lastSpaceTrackFetchTs;
+    globalThis.__spaceTrackFetchTimestamps = spaceTrackFetchTimestamps;
 
     const loginBody = new URLSearchParams({
       identity: SPACETRACK_USER,
