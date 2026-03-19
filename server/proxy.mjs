@@ -4747,12 +4747,12 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  res.setHeader('Content-Type', 'application/json');
-
   if (url === '/api/flights') {
+    res.setHeader('Content-Type', 'application/json');
     await handleFlights(query, res);
   } else if (url === '/api/cameras/stream/health') {
     try {
+      res.setHeader('Content-Type', 'application/json');
       await handleCameraStreamHealth(res);
     } catch (err) {
       res.writeHead(502, { 'Content-Type': 'application/json' });
@@ -4760,6 +4760,7 @@ const server = http.createServer(async (req, res) => {
     }
   } else if (url === '/api/cameras/stream') {
     try {
+      res.setHeader('Content-Type', 'application/json');
       await handleCameraStreamProxy(queryParams, res);
     } catch (err) {
       res.writeHead(502, { 'Content-Type': 'application/json' });
@@ -4767,6 +4768,7 @@ const server = http.createServer(async (req, res) => {
     }
   } else if (url.startsWith('/api/cameras/hls/')) {
     try {
+      res.setHeader('Content-Type', 'application/json');
       await handleCameraHlsSegment(url, res);
     } catch (err) {
       res.writeHead(502, { 'Content-Type': 'application/json' });
@@ -4774,6 +4776,7 @@ const server = http.createServer(async (req, res) => {
     }
   } else if (url === '/api/nofly_gps') {
     try {
+      res.setHeader('Content-Type', 'application/json');
       const parts = (query.bounds ?? '').split(',').map(Number);
       const bounds = (parts.length === 4 && parts.every(n => Number.isFinite(n))) ? parts : null;
       const payload = await getOverlayPayload(bounds);
@@ -4786,12 +4789,12 @@ const server = http.createServer(async (req, res) => {
         cacheHit: payload.cacheHit,
       }));
     } catch (err) {
-      res.writeHead(502);
+      res.writeHead(502, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: err?.message ?? 'nofly_gps request failed' }));
       return;
     }
   } else {
-    res.writeHead(404);
+    res.writeHead(404, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ error: 'Not found' }));
   }
   // ...existing code...
