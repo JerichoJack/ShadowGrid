@@ -2187,6 +2187,29 @@ function initEntityPicker(viewer) {
       if (info.typecode) setEnrichedTypecode(icao.toLowerCase(), info.typecode);
       renderPanel(panel, { icao, callsign, altFt, kts, heading, squawk, vert, provider, dbFlags, classification, ...info }, viewer, entity);
 
+      // --- Auto-post enriched aircraft info to proxy for database update ---
+      try {
+        const postData = {
+          icao24: icao.toLowerCase(),
+          registration: info.registration || '',
+          typecode: info.typecode || '',
+          manufacturer: info.manufacturer || '',
+          model: info.model || '',
+          operator: info.operator || '',
+          country: info.country || '',
+        };
+        // Only post if we have at least icao24 and typecode or model
+        if (postData.icao24 && (postData.typecode || postData.model)) {
+          fetch('/api/aircraftdb', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(postData),
+          });
+        }
+      } catch (err) {
+        // Silent fail; do not block UI
+      }
+
     } else if (type === 'satellite') {
       setSatelliteSelection(entity, true);
       setSatelliteInfoPanelVisible(true);

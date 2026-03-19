@@ -1,3 +1,8 @@
+// Dynamic aircraft database updater
+import { upsertAircraftRecord } from './collectors/upsertAircraftRecord.js';
+// API endpoint: POST /api/aircraftdb
+// Body: { icao24, registration, typecode, manufacturer, model, operator, country }
+// ...existing code...
 /**
  * server/proxy.mjs
  * ShadowGrid flight data proxy — viewport-aware, on-demand hub fetching.
@@ -4703,13 +4708,86 @@ async function handleFlights(query, res) {
 
 const server = http.createServer(async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
 
-  const [path, qs] = req.url.split('?');
-  const queryParams = new URLSearchParams(qs ?? '');
-  const query = Object.fromEntries(queryParams);
-  const url   = path.replace(/\/$/, '');
+  // Aircraft DB API endpoint
+  if (req.method === 'POST' && url === '/api/aircraftdb') {
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', () => {
+      try {
+        const data = JSON.parse(body);
+        if (!data.icao24) throw new Error('icao24 required');
+        upsertAircraftRecord(data);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true }));
+      } catch (err) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+    });
+    return;
+  }
+
+  try {
+    if (url.startsWith('/tiles/google/') || url.startsWith('/tiles/maptiler/')) {
+      await handleTileProxy(url, queryParams, res);
+      return;
+    }
+  } catch (err) {
+    res.writeHead(502, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: err?.message ?? 'tile proxy failed' }));
+    return;
+  }
+
+  res.setHeader('Content-Type', 'application/json');
+
+  if (url === '/api/flights') {
+    await handleFlights(query, res);
+  } else if (url === '/api/cameras/stream/health') {
+    try {
+      await handleCameraStreamHealth(res);
+    } catch (err) {
+      res.writeHead(502, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: err?.message ?? 'camera stream health failed' }));
+    }
+  } else if (url === '/api/cameras/stream') {
+    try {
+      await handleCameraStreamProxy(queryParams, res);
+    } catch (err) {
+      res.writeHead(502, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: err?.message ?? 'camera stream proxy failed' }));
+    }
+  } else if (url.startsWith('/api/cameras/hls/')) {
+    try {
+      await handleCameraHlsSegment(url, res);
+    } catch (err) {
+      res.writeHead(502, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: err?.message ?? 'camera hls segment failed' }));
+    }
+  } else if (url === '/api/nofly_gps') {
+    try {
+      const parts = (query.bounds ?? '').split(',').map(Number);
+      const bounds = (parts.length === 4 && parts.every(n => Number.isFinite(n))) ? parts : null;
+      const payload = await getOverlayPayload(bounds);
+      res.writeHead(200);
+      res.end(JSON.stringify({
+        ts: payload.ts,
+        maxFlightHeightMeters: payload.maxFlightHeightMeters,
+        flightRestrictions: payload.flightRestrictions,
+        gpsInterference: payload.gpsInterference,
+        cacheHit: payload.cacheHit,
+      }));
+    } catch (err) {
+      res.writeHead(502);
+      res.end(JSON.stringify({ error: err?.message ?? 'nofly_gps request failed' }));
+    }
+  } else {
+    res.writeHead(404);
+    res.end(JSON.stringify({ error: 'Not found' }));
+  }
+  // ...existing code...
 
   try {
     if (url.startsWith('/tiles/google/') || url.startsWith('/tiles/maptiler/')) {
