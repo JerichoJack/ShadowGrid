@@ -2227,8 +2227,10 @@ function initEntityPicker(viewer) {
           operator: info.operator || '',
           country: info.country || '',
         };
-        // Only POST if at least one of typecode or model is non-empty (to match backend requirements)
-        if ((postData.typecode && postData.typecode !== '') || (postData.model && postData.model !== '')) {
+        // Only POST if at least one of typecode or model is a real value (not empty or placeholder)
+        const validTypecode = postData.typecode && postData.typecode !== '' && postData.typecode !== '—';
+        const validModel = postData.model && postData.model !== '' && postData.model !== '—';
+        if (validTypecode || validModel) {
           fetch(`${BACKEND_BASE_URL}/api/aircraftdb`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
