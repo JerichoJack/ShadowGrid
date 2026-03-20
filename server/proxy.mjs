@@ -4937,6 +4937,36 @@ const server = http.createServer(async (req, res) => {
   const query = Object.fromEntries(queryParams);
   const url = path.replace(/\/$/, '');
 
+  // Aircraft Info Proxy Endpoint: GET /api/proxy/aircraft/:icao or /api/proxy/aircraft?icao=... or ?icao24=...
+  if (req.method === 'GET' && (url.startsWith('/api/proxy/aircraft/'))) {
+    // Accept /api/proxy/aircraft/:icao or /api/proxy/aircraft/:icao24
+    // Also accept ?icao=... or ?icao24=... as query params
+    let icao = url.split('/').pop();
+    // If the last segment is empty (trailing slash), fallback to query param
+    if (!icao || icao === 'aircraft') {
+      icao = query.icao24 || query.icao || null;
+    }
+    // If still not found, try query param
+    if (!icao) {
+      icao = query.icao24 || query.icao || null;
+    }
+    // Accept callsign as query param (legacy: some clients may send ?callsign=...)
+    const callsign = query.callsign || query.icao || query.icao24 || null;
+    if (!icao) {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Missing required ICAO or ICAO24 code' }));
+      return;
+    }
+    try {
+      const result = await fetchAircraftInfoFromApis(icao, callsign);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(result));
+    } catch (err) {
+      res.writeHead(502, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: err?.message ?? 'aircraft info proxy failed' }));
+    }
+    return;
+  }
   // Aircraft DB API endpoint
   if (req.method === 'POST' && url === '/api/aircraftdb') {
     let body = '';
