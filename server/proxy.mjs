@@ -4855,18 +4855,22 @@ const server = http.createServer(async (req, res) => {
       const parts = (query.bounds ?? '').split(',').map(Number);
       const bounds = (parts.length === 4 && parts.every(n => Number.isFinite(n))) ? parts : null;
       const payload = await getOverlayPayload(bounds);
-      res.writeHead(200);
-      res.end(JSON.stringify({
-        ts: payload.ts,
-        maxFlightHeightMeters: payload.maxFlightHeightMeters,
-        internetBlackouts: payload.internetBlackouts,
-        cacheHit: payload.cacheHit,
-      }));
+      if (!res.headersSent) {
+        res.writeHead(200);
+        res.end(JSON.stringify({
+          ts: payload.ts,
+          maxFlightHeightMeters: payload.maxFlightHeightMeters,
+          internetBlackouts: payload.internetBlackouts,
+          cacheHit: payload.cacheHit,
+        }));
+      }
       return;
     } catch (err) {
       console.error('[proxy] /api/internet error:', err);
-      res.writeHead(502);
-      res.end(JSON.stringify({ error: err?.message ?? 'internet request failed' }));
+      if (!res.headersSent) {
+        res.writeHead(502);
+        res.end(JSON.stringify({ error: err?.message ?? 'internet request failed' }));
+      }
       return;
     }
   } else if (url === '/api/traffic/google') {
