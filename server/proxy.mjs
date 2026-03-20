@@ -1287,6 +1287,158 @@ const CategoryIcons = {
     'C3' : ['ground_tower', 1],
 };
 
+// ── Aircraft classification → color ──────────────────────────────────────────
+//   Commercial  = green   (#00e676)
+//   Military    = red     (#f44336)
+//   Other       = orange  (#ffa726)
+//
+// Classification uses (in priority order):
+//   1. dbFlags bit 0 (military=1) from adsb.fi / ADSBex database
+//   2. Known military ICAO hex ranges (AE0000–AFFFFF = US military, etc.)
+//   3. Callsign pattern: IATA/ICAO airline prefix → commercial
+//   4. Callsign pattern: military prefixes (RCH, RRR, CNV, etc.) → military
+
+// Major military ICAO hex ranges (prefix matches)
+// NOTE: Treat these as weak evidence unless reinforced by military dbFlags,
+// callsign, or military-specific type code.
+const MILITARY_HEX_PREFIXES = [
+  'ae',           // United States military (AE0000–AFFFFF)
+  '43c',          // United Kingdom military
+  '3f4',          // Germany military
+  '3a0',          // France military (Armée de l'air)
+  // NOTE: '461' removed — this is Finland's civil ICAO block (460000–46FFFF), NOT Russia
+  '7001', '7002', // China military
+  '710',          // Japan JASDF
+  '7c0',          // Australia military
+  'c40',          // Canada military
+  // NOTE: '4ca' removed — this is the entire Irish ICAO block (4C0000–4CFFFF),
+  //       including all Aer Lingus/Ryanair/civilian EI- registrations.
+  //       Irish Air Corps aircraft don't have a unique isolated prefix.
+  '48c',          // Italy military
+  '340',          // Spain military
+];
+
+// Military-specific airframe type codes.
+const MILITARY_TYPE_PREFIXES = [
+  'C17', 'C130', 'C135', 'KC', 'E3', 'E6', 'P8',
+  'F15', 'F16', 'F18', 'F22', 'F35', 'B1', 'B2', 'B52',
+  'A400', 'IL76', 'AN12', 'AN22', 'AN72', 'AN74',
+];
+
+// Well-known commercial airline ICAO 3-letter prefixes (callsign starts with these)
+const AIRLINE_PREFIXES = new Set([
+  'AAL','UAL','DAL','SWA','SKW','ASA','NKS','JBU','FFT','HAL',  // US majors
+  'JIA','ENY','RPA','EDV','MXY','AAY','NKS','JBU','JZA','QXE',  // US/CA regional + ULCC
+  'BAW','EZY','RYR','VIR','TOM','MON','LOG','TCX','EXS',        // UK
+  'AFR','AEE','IBE','VLG','TAP','KLM','DLH','LFT','BEL','SWR',  // Europe
+  'AUA','SAS','FIN','LOT','TAR','CSA','EWG','TUI','WZZ','NAX',  // Europe
+  'UAE','ETD','QTR','SVA','ELY','MEA','THY','MSR','KAC',        // Middle East
+  'QTR','UAE','ETD','ABY','FDB','JZR','AIZ','OMA','QJE',        // Gulf / ME low-cost
+  'SIA','CPA','CES','CSN','MAS','THA','GIA','PAL','AIC','ANA',  // Asia
+  'JAL','KAL','AAR','JNA','AIQ','IGO','AXB','VTI','CCA','HDA',  // Asia
+  'CSH','CES','CSN','CHH','XAX','HVN','VJC','SJO','AMU','ALK',  // Asia
+  'QFA','ANZ','JST','VOZ','RXA','QJE','QLK',                    // Pacific
+  'ETH','KQA','SAA','RAM','TSC','MAU','DAH','RWD','EWA',        // Africa
+  'TAM','GLO','AVA','LAN','AZU','BOA','CMP','AMX','VOI','VIV',  // Latin America
+  'ARG','LPE','SKX','ACA','WJA','JBU','DAL','AAL','UAL',        // Americas interline
+  'FDX','UPS','ABX','ATN','GTI',                                // Cargo
+  'CJT','CLX','BOX','DHK','NCA','KAL','CKK','MNB','BCS',        // Cargo international
+]);
+
+// Known military callsign prefixes
+const MILITARY_CALLSIGN_PREFIXES = [
+  'RCH',  // US Air Mobility Command (Reach)
+  'CNV',  // US Navy Convey
+  'RRR',  // RAF tankers
+  'IRON', // USAF
+  'JAKE', 'SKULL','VIPER','KNIFE','GHOST','DEMON','REAPER',
+  'NCO',  // NATO
+  'GRZLY','VALOR','BLADE','SWORD','LANCE',
+  'NATO',
+  'ALLO', // French military
+  'GAF',  // German Air Force
+  'SHF',  // SHAPE
+];
+
+// OpenSky / ADS-B emitter category values that are strongly commercial-like.
+// Source: OpenSky state vector category documentation.
+const COMMERCIAL_NUMERIC_CATEGORIES = new Set([2, 3, 4, 5, 6]);
+
+function normalizeCategory(cat) {
+  if (typeof cat === 'number' && Number.isFinite(cat)) return cat;
+  if (typeof cat === 'string') {
+    const s = cat.trim().toUpperCase();
+    // READSB-like providers often use A0..A7 strings.
+    if (/^[AB][0-9]$/.test(s)) return s;
+    const n = Number(s);
+    if (Number.isFinite(n)) return n;
+  }
+  return null;
+}
+
+function isLikelyCommercialCallsign(cs) {
+  if (!cs) return false;
+  if (MILITARY_CALLSIGN_PREFIXES.some(p => cs.startsWith(p))) return false;
+
+  // Typical airline format: 2-3 letter designator + flight number + optional 1-2 letter suffix.
+  // Allow up to 2 suffix letters (e.g. EIN7AC, BAW234A).
+  const m = cs.match(/^([A-Z]{2,3})(\d{1,4})([A-Z]{0,2})$/);
+  if (!m) return false;
+
+  const prefix = m[1];
+  if (prefix.length === 3) return true; // Most ICAO operators are 3-letter codes
+  return AIRLINE_PREFIXES.has(prefix);
+}
+
+function classifyAircraft(a) {
+  const squawk = String(a.squawk ?? '').trim();
+  const emergencyCode = ['7500', '7600', '7700'].includes(squawk);
+  const emergencyFlag = String(a.emergency ?? '').toLowerCase();
+  const isEmergency = emergencyCode || (emergencyFlag && emergencyFlag !== 'none');
+  if (isEmergency) return 'emergency';
+
+  if (a.onGround === true) return 'ground';
+
+  // 1) Extract reusable evidence signals
+  const cs = (a.callsign ?? '').toUpperCase().trim();
+  const prefix3 = cs.slice(0, 3);
+  const hasMilitaryCallsign = !!cs && MILITARY_CALLSIGN_PREFIXES.some(p => cs.startsWith(p));
+  const hasCommercialCallsign = isLikelyCommercialCallsign(cs)
+    || (!!cs && AIRLINE_PREFIXES.has(prefix3) && /\d/.test(cs));
+  const category = normalizeCategory(a.category);
+  const hasCommercialCategory = typeof category === 'number' && COMMERCIAL_NUMERIC_CATEGORIES.has(category);
+
+  // 2) Strong direct signals
+  if ((a.dbFlags ?? 0) & 1) return 'military';
+  if (hasMilitaryCallsign) return 'military';
+  if (hasCommercialCallsign || hasCommercialCategory) return 'commercial';
+
+  // 3) Airframe evidence
+  const typecode = (a.typecode ?? '').toUpperCase().trim();
+  const hasMilitaryType = !!typecode && MILITARY_TYPE_PREFIXES.some(p => typecode.startsWith(p));
+  if (hasMilitaryType) return 'military';
+
+  // 4) Known military ICAO hex prefix (weak evidence). To reduce false
+  // positives, do NOT use this if we already saw commercial category data.
+  const hexLow = (a.id ?? '').toLowerCase();
+  if (!hasCommercialCategory && MILITARY_HEX_PREFIXES.some(p => hexLow.startsWith(p))) {
+    return 'military';
+  }
+
+  // 5) Fallback
+  if (cs) {
+    if (isLikelyCommercialCallsign(cs)) return 'commercial';
+  }
+
+  // 6) If typecode is a known airliner/jet, treat as commercial
+  if (typecode && TypeDesignatorIcons[typecode]) {
+    return 'commercial';
+  }
+
+  // If not commercial, military, emergency, or ground, classify as 'other'
+  return 'other';
+}
+
 const DEFAULT_ICON = 'airliner';
 const DEFAULT_ICON_SCALE = 1;
 
