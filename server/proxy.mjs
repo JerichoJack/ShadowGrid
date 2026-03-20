@@ -4747,55 +4747,293 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  if (url === '/api/flights') {
-    res.setHeader('Content-Type', 'application/json');
-    await handleFlights(query, res);
-  } else if (url === '/api/cameras/stream/health') {
-    try {
+  // Unified endpoint handler block
+  try {
+    if (url === '/api/flights') {
       res.setHeader('Content-Type', 'application/json');
-      await handleCameraStreamHealth(res);
-    } catch (err) {
-      res.writeHead(502, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: err?.message ?? 'camera stream health failed' }));
-    }
-  } else if (url === '/api/cameras/stream') {
-    try {
-      res.setHeader('Content-Type', 'application/json');
-      await handleCameraStreamProxy(queryParams, res);
-    } catch (err) {
-      res.writeHead(502, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: err?.message ?? 'camera stream proxy failed' }));
-    }
-  } else if (url.startsWith('/api/cameras/hls/')) {
-    try {
-      res.setHeader('Content-Type', 'application/json');
-      await handleCameraHlsSegment(url, res);
-    } catch (err) {
-      res.writeHead(502, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: err?.message ?? 'camera hls segment failed' }));
-    }
-  } else if (url === '/api/nofly_gps') {
-    try {
-      res.setHeader('Content-Type', 'application/json');
+      await handleFlights(query, res);
+    } else if (url === '/api/cameras/stream/health') {
+      try {
+        res.setHeader('Content-Type', 'application/json');
+        await handleCameraStreamHealth(res);
+      } catch (err) {
+        res.writeHead(502, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err?.message ?? 'camera stream health failed' }));
+      }
+    } else if (url === '/api/cameras/stream') {
+      try {
+        res.setHeader('Content-Type', 'application/json');
+        await handleCameraStreamProxy(queryParams, res);
+      } catch (err) {
+        res.writeHead(502, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err?.message ?? 'camera stream proxy failed' }));
+      }
+    } else if (url.startsWith('/api/cameras/hls/')) {
+      try {
+        res.setHeader('Content-Type', 'application/json');
+        await handleCameraHlsSegment(url, res);
+      } catch (err) {
+        res.writeHead(502, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err?.message ?? 'camera hls segment failed' }));
+      }
+    } else if (url === '/api/nofly_gps') {
+      try {
+        res.setHeader('Content-Type', 'application/json');
+        const parts = (query.bounds ?? '').split(',').map(Number);
+        const bounds = (parts.length === 4 && parts.every(n => Number.isFinite(n))) ? parts : null;
+        const payload = await getOverlayPayload(bounds);
+        res.writeHead(200);
+        res.end(JSON.stringify({
+          ts: payload.ts,
+          maxFlightHeightMeters: payload.maxFlightHeightMeters,
+          flightRestrictions: payload.flightRestrictions,
+          gpsInterference: payload.gpsInterference,
+          cacheHit: payload.cacheHit,
+        }));
+      } catch (err) {
+        res.writeHead(502, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err?.message ?? 'nofly_gps request failed' }));
+      }
+    } else if (url === '/api/internet') {
+      try {
+        const parts = (query.bounds ?? '').split(',').map(Number);
+        const bounds = (parts.length === 4 && parts.every(n => Number.isFinite(n))) ? parts : null;
+        const payload = await getOverlayPayload(bounds);
+        if (!res.headersSent) {
+          res.writeHead(200);
+          res.end(JSON.stringify({
+            ts: payload.ts,
+            maxFlightHeightMeters: payload.maxFlightHeightMeters,
+            internetBlackouts: payload.internetBlackouts,
+            cacheHit: payload.cacheHit,
+          }));
+        }
+        return;
+      } catch (err) {
+        console.error('[proxy] /api/internet error:', err);
+        if (!res.headersSent) {
+          res.writeHead(502);
+          res.end(JSON.stringify({ error: err?.message ?? 'internet request failed' }));
+        }
+        return;
+      }
+    } else if (url === '/api/traffic/google') {
       const parts = (query.bounds ?? '').split(',').map(Number);
-      const bounds = (parts.length === 4 && parts.every(n => Number.isFinite(n))) ? parts : null;
-      const payload = await getOverlayPayload(bounds);
+      if (parts.length !== 4 || parts.some(n => !Number.isFinite(n))) {
+        res.writeHead(400);
+        res.end(JSON.stringify({ error: 'bounds must be minLon,minLat,maxLon,maxLat' }));
+        return;
+      }
+      try {
+        const payload = await getTrafficPayload(parts);
+        res.writeHead(200);
+        res.end(JSON.stringify(payload));
+      } catch (err) {
+        res.writeHead(502);
+        res.end(JSON.stringify({ error: err?.message ?? 'traffic request failed' }));
+        return;
+      }
+    } else if (url === '/api/marine/snapshot') {
+      const parts = (query.bounds ?? '').split(',').map(Number);
+      if (parts.length !== 4 || parts.some(n => !Number.isFinite(n))) {
+        res.writeHead(400);
+        res.end(JSON.stringify({ error: 'bounds must be minLon,minLat,maxLon,maxLat' }));
+        return;
+      }
+      try {
+        const payload = await getMarinePayload(parts);
+        res.writeHead(200);
+        res.end(JSON.stringify(payload));
+      } catch (err) {
+        res.writeHead(502);
+        res.end(JSON.stringify({ error: err?.message ?? 'marine snapshot failed' }));
+        return;
+      }
+    } else if (url === '/api/satellite-imagery/health') {
       res.writeHead(200);
       res.end(JSON.stringify({
-        ts: payload.ts,
-        maxFlightHeightMeters: payload.maxFlightHeightMeters,
-        flightRestrictions: payload.flightRestrictions,
-        gpsInterference: payload.gpsInterference,
-        cacheHit: payload.cacheHit,
+        ok: true,
+        ts: Date.now(),
+        copernicusDataspaceConfigured: Boolean(COPERNICUS_DATASPACE_WMS_URL),
+        sentinelHubConfigured: Boolean(SENTINEL_HUB_WMS_URL),
       }));
-    } catch (err) {
-      res.writeHead(502, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: err?.message ?? 'nofly_gps request failed' }));
-      return;
+    } else if (url === '/api/satellite-imagery/preview') {
+      const lat = Number(query.lat);
+      const lon = Number(query.lon);
+      if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+        res.writeHead(400);
+        res.end(JSON.stringify({ error: 'lat and lon are required numeric query params' }));
+        return;
+      }
+      const validation = validateSatelliteImageryRequest({
+        lat,
+        lon,
+        date: String(query.date ?? ''),
+        source: String(query.source ?? 'auto'),
+        collectionId: String(query.collection ?? ''),
+        bands: String(query.bands ?? ''),
+      });
+      if (!validation.ok) {
+        res.writeHead(400);
+        res.end(JSON.stringify({ error: validation.error }));
+        return;
+      }
+      const request = validation.value;
+      try {
+        const payload = await resolveSatelliteImageryPreview({
+          lat: request.lat,
+          lon: request.lon,
+          date: request.date,
+          source: request.source,
+          collectionId: request.collectionId,
+          bands: request.bands,
+        });
+        res.writeHead(200);
+        res.end(JSON.stringify({
+          ...payload,
+          location: { lat: request.lat, lon: request.lon },
+          request,
+          copernicusDataspaceConfigured: Boolean(COPERNICUS_DATASPACE_WMS_URL),
+          sentinelHubConfigured: Boolean(SENTINEL_HUB_WMS_URL),
+        }));
+      } catch (err) {
+        res.writeHead(502);
+        res.end(JSON.stringify({ error: err?.message ?? 'satellite imagery preview failed' }));
+      }
+    } else if (url === '/api/satellites/snapshot') {
+      const rawMax = parseInt(query.max ?? '0', 10);
+      const maxCount = rawMax > 0 ? rawMax : Infinity;
+      const perCategory = Math.max(parseInt(query.perCategory ?? `${SATELLITE_MAX_PER_CATEGORY}`, 10) || SATELLITE_MAX_PER_CATEGORY, 1);
+      const categories = String(query.categories ?? '')
+        .split(',')
+        .map(s => s.trim().toLowerCase())
+        .filter(Boolean);
+      try {
+        const payload = await getSatellitesSnapshotPayload(maxCount, { perCategory, categories });
+        res.writeHead(200);
+        res.end(JSON.stringify(payload));
+      } catch (err) {
+        res.writeHead(502);
+        res.end(JSON.stringify({ error: err?.message ?? 'satellite snapshot failed' }));
+      }
+    } else if (url === '/api/cameras/snapshot') {
+      const parts = (query.bounds ?? '').split(',').map(Number);
+      if (parts.length !== 4 || parts.some(n => !Number.isFinite(n))) {
+        res.writeHead(400);
+        res.end(JSON.stringify({ error: 'bounds must be minLon,minLat,maxLon,maxLat' }));
+        return;
+      }
+      const maxCount = Math.max(parseInt(query.max ?? `${CAMERA_MAX_POINTS}`, 10) || CAMERA_MAX_POINTS, 1);
+      try {
+        const payload = await getCameraSnapshot(parts, maxCount);
+        res.writeHead(200);
+        res.end(JSON.stringify(payload));
+      } catch (err) {
+        res.writeHead(502);
+        res.end(JSON.stringify({ error: err?.message ?? 'camera snapshot failed' }));
+        return;
+      }
+    } else if (url === '/api/world/snapshot') {
+      const parts = (query.bounds ?? '').split(',').map(Number);
+      const bounds = (parts.length === 4 && parts.every(n => Number.isFinite(n))) ? parts : null;
+      const include = new Set((query.include ?? 'flights,satellites,traffic,marine,cameras').split(',').map(s => s.trim().toLowerCase()).filter(Boolean));
+      const maxSat = Math.max(parseInt(query.satMax ?? '0', 10) || 0, 0) || Infinity;
+      const satPerCategory = Math.max(parseInt(query.satPerCategory ?? `${SATELLITE_MAX_PER_CATEGORY}`, 10) || SATELLITE_MAX_PER_CATEGORY, 1);
+      const satCategories = String(query.satCategories ?? '')
+        .split(',')
+        .map(s => s.trim().toLowerCase())
+        .filter(Boolean);
+      const maxCam = Math.max(parseInt(query.camMax ?? `${CAMERA_MAX_POINTS}`, 10) || CAMERA_MAX_POINTS, 1);
+      try {
+        const payload = { ts: Date.now(), mode: SERVER_HEAVY_MODE ? 'heavy' : 'normal' };
+        const flightsPromise = include.has('flights')
+          ? getFlightsPayload({
+            bounds: bounds ? bounds.join(',') : '',
+            mode: 'heavy',
+          })
+          : null;
+        const satellitesPromise = include.has('satellites')
+          ? getSatellitesSnapshotPayload(maxSat, { perCategory: satPerCategory, categories: satCategories })
+          : null;
+        const trafficPromise = (include.has('traffic') && bounds)
+          ? getTrafficPayload(bounds)
+          : null;
+        const marinePromise = (include.has('marine') && bounds)
+          ? getMarinePayload(bounds)
+          : null;
+        const camerasPromise = (include.has('cameras') && bounds)
+          ? getCameraSnapshot(bounds, maxCam)
+          : null;
+        const [flightsPayload, satellitesPayload, trafficPayload, marinePayload, camerasPayload] = await Promise.all([
+          flightsPromise,
+          satellitesPromise,
+          trafficPromise,
+          marinePromise,
+          camerasPromise,
+        ]);
+        if (flightsPayload) payload.flights = flightsPayload;
+        if (satellitesPayload) payload.satellites = satellitesPayload;
+        if (trafficPayload) payload.traffic = trafficPayload;
+        if (marinePayload) payload.marine = marinePayload;
+        if (camerasPayload) payload.cameras = camerasPayload;
+        payload.diagnostics = {
+          providers: {
+            flights: payload.flights?.source ?? null,
+            satellites: payload.satellites?.source ?? null,
+            traffic: payload.traffic?.source ?? null,
+            marine: payload.marine?.source ?? null,
+            cameras: payload.cameras?.source ?? null,
+          },
+          cache: {
+            flights: payload.flights?.cacheHit ?? null,
+            satellites: payload.satellites?.cacheHit ?? null,
+            traffic: payload.traffic?.cacheHit ?? null,
+            marine: payload.marine?.cacheHit ?? null,
+            cameras: payload.cameras?.cacheHit ?? null,
+          },
+        };
+        if (!res.headersSent) {
+          res.writeHead(200);
+          res.end(JSON.stringify(payload));
+        }
+        return;
+      } catch (err) {
+        if (!res.headersSent) {
+          res.writeHead(502);
+          res.end(JSON.stringify({ error: err?.message ?? 'world snapshot failed' }));
+        }
+        return;
+      }
+    } else if (url === '/health') {
+      ensureTileCacheDir();
+      const tileEntries = fs.readdirSync(TILE_CACHE_DIR).filter(name => name.endsWith('.json')).length;
+      res.writeHead(200);
+      res.end(JSON.stringify({
+        status: 'ok',
+        db: db.size,
+        hubs: ALL_HUBS.length,
+        hub_cache: hubCache.size,
+        cache: {
+          flights: flightSnapshotCache.size,
+          traffic: trafficSnapshotCache.size,
+          marine: marineSnapshotCache.size,
+          sat_points: satSnapshotCache.points?.length ?? 0,
+          camera_tiles: cameraTileCache.size,
+          camera_snapshots: cameraSnapshotCache.size,
+        },
+        tileCache: {
+          dir: TILE_CACHE_DIR,
+          entries: tileEntries,
+          ttlMs: TILE_CACHE_TTL_MS,
+        },
+      }));
+    } else {
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Not found' }));
     }
-  } else {
-    res.writeHead(404, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ error: 'Not found' }));
+  } catch (err) {
+    res.writeHead(500, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: err?.message ?? 'Internal server error' }));
   }
   // ...existing code...
 
