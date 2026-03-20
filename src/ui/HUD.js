@@ -2119,6 +2119,10 @@ function initEntityPicker(viewer) {
       if (currentSelectedFlightId) {
         setFlightGlow(currentSelectedFlightId, false);
         currentSelectedFlightId = null;
+        // Re-apply correct icon/iconScale after unselect
+        import('../layers/flights.js').then(mod => {
+          if (mod.applyFlatIconVisibility) mod.applyFlatIconVisibility();
+        });
       }
       clearSatelliteSelection();
       panel.style.display = 'none';
@@ -2136,6 +2140,10 @@ function initEntityPicker(viewer) {
       if (currentSelectedFlightId) {
         setFlightGlow(currentSelectedFlightId, false);
         currentSelectedFlightId = null;
+        // Re-apply correct icon/iconScale after unselect
+        import('../layers/flights.js').then(mod => {
+          if (mod.applyFlatIconVisibility) mod.applyFlatIconVisibility();
+        });
       }
 
       setSatelliteSelection(primaryEntity, true);
