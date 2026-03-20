@@ -5104,6 +5104,36 @@ server.listen(PORT, () => {
   console.log(`[proxy] Mode: ${SERVER_HEAVY_MODE ? 'heavy' : 'normal'}`);
   console.log(`[proxy] Providers: flights=${BACKEND_FLIGHT_PROVIDER}, satellites=${BACKEND_SATELLITE_PROVIDER}, satelliteImagery=${BACKEND_SATELLITE_IMAGERY_PROVIDER || 'auto'}`);
   console.log(`[proxy] ShadowGrid → http://localhost:${PORT}/api/flights?bounds=minLon,minLat,maxLon,maxLat`);
+
+  // Announce available endpoints
+  const endpointList = [
+    '/api/flights',
+    '/api/world/snapshot',
+    '/api/cameras/snapshot',
+    '/api/cameras/stream',
+    '/api/cameras/stream/health',
+    '/api/cameras/hls/{id}',
+    '/api/nofly_gps',
+    '/api/internet',
+    '/api/traffic/google',
+    '/api/marine/snapshot',
+    '/api/satellite-imagery/health',
+    '/api/satellite-imagery/preview',
+    '/api/satellites/snapshot',
+    '/api/aircraftdb (POST)',
+    '/health',
+  ];
+  const baseUrls = [
+    `http://localhost:${PORT}`,
+    ...(process.env.HOST ? [`http://${process.env.HOST}:${PORT}`] : [])
+  ];
+  console.log('[proxy] Available Endpoints:');
+  for (const base of baseUrls) {
+    for (const ep of endpointList) {
+      console.log(`  ➜  ${base}${ep}`);
+    }
+  }
+
   ensureSatelliteCatalog()
     .then(() => {
       console.log(`[proxy] Satellite catalog primed: ${satCatalog.length} objects (${satCatalogSource})`);
