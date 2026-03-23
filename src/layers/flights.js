@@ -1506,17 +1506,18 @@ function getShape(a) {
   console.warn('[DEBUG] getShape: fallback to unknown for aircraft', a.id, a);
   // Fire-and-forget fetch to log full aircraft API data
   if (a.id) {
+    const serverUrl = 'http://192.168.4.218:3001/api/proxy/aircraft/' + encodeURIComponent(a.id);
     try {
-      fetch(`/api/proxy/aircraft/${encodeURIComponent(a.id)}`)
+      fetch(serverUrl)
         .then(r => r.json())
         .then(data => {
-          console.warn(`[DEBUG] /api/proxy/aircraft/${a.id} response:`, data);
+          console.warn(`[DEBUG] ${serverUrl} response:`, data);
         })
         .catch(err => {
-          console.warn(`[DEBUG] /api/proxy/aircraft/${a.id} fetch error:`, err);
+          console.warn(`[DEBUG] ${serverUrl} fetch error:`, err);
         });
     } catch (err) {
-      console.warn(`[DEBUG] /api/proxy/aircraft/${a.id} fetch exception:`, err);
+      console.warn(`[DEBUG] ${serverUrl} fetch exception:`, err);
     }
   }
   return 'unknown';
