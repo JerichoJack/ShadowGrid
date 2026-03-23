@@ -17,6 +17,8 @@ async function fetchAircraftInfoFromApis(icao, callsign) {
       if (!resp.ok) continue;
       const data = await resp.json();
       if (data && Object.keys(data).length > 0) {
+        // If adsbdb returns {response: 'unknown aircraft'}, skip
+        if (data.response && typeof data.response === 'string' && data.response.toLowerCase().includes('unknown')) continue;
         results.push({ source: url, data });
       }
     } catch (err) {
@@ -24,11 +26,34 @@ async function fetchAircraftInfoFromApis(icao, callsign) {
     }
   }
   // Prefer the first successful result
+  let enriched = null;
+  let sources = [];
   if (results.length > 0) {
-    // Optionally, merge/enrich with callsign if provided
-    const enriched = { ...results[0].data };
+    enriched = { ...results[0].data };
+    sources = results.map(r => r.source);
+  } else {
+    // Fallback: try airplanes.live
+    try {
+      const url = `https://api.airplanes.live/v2/icao/${icao}`;
+      const resp = await fetch(url, { headers: HEADERS, signal: AbortSignal.timeout(8000) });
+      if (resp.ok) {
+        const d = await resp.json();
+        if (d && d.ac && d.ac.length > 0) {
+          enriched = d.ac[0];
+          sources = [url];
+        }
+      }
+    } catch (err) {
+      // Ignore
+    }
+  }
+  if (enriched) {
     if (callsign && !enriched.callsign) enriched.callsign = callsign;
-    return { ok: true, icao, callsign, result: enriched, sources: results.map(r => r.source) };
+    enrichAircraftFromDb(enriched);
+    if (!('category' in enriched)) enriched.category = '';
+    if (!('icon' in enriched)) enriched.icon = 'unknown';
+    if (!('classification' in enriched)) enriched.classification = classifyAircraftServer(enriched);
+    return { ok: true, icao, callsign, result: enriched, sources };
   }
   return { ok: false, icao, callsign, error: 'No data found from external APIs' };
 }
