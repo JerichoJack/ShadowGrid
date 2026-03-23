@@ -1469,6 +1469,14 @@ function normalizeTypecode(typecode) {
 function getShape(a) {
   // If server provided icon, use it
   if (a.icon) return a.icon;
+
+  // Always normalize category and check CategoryIcons first for special categories
+  let cat = a.category;
+  if (cat && typeof cat === 'string') cat = cat.trim().toUpperCase();
+  if (cat && CategoryIcons[cat]) {
+    return CategoryIcons[cat][0];
+  }
+
   // Try normalized typecode
   const typecode = normalizeTypecode(a.typecode);
   if (typecode && TypeDesignatorIcons[typecode]) {
@@ -1488,10 +1496,6 @@ function getShape(a) {
   if (a.typeDescription) {
     const letter = a.typeDescription[0].toUpperCase();
     if (TypeDescriptionIcons[letter]) return TypeDescriptionIcons[letter][0];
-  }
-  // Try ADS-B category
-  if (a.category && CategoryIcons[a.category]) {
-    return CategoryIcons[a.category][0];
   }
   // Fallback
   return 'unknown';
