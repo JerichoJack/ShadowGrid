@@ -1449,7 +1449,12 @@ function aircraftColor(a) {
 function getShape(a) {
   // Use backend-enriched icon if present
   if (a.icon && typeof a.icon === 'string' && a.icon !== 'unknown') {
-    return a.icon;
+    const iconTrimmed = a.icon.trim();
+    if (iconTrimmed !== a.icon) {
+      console.warn('[DEBUG] getShape: icon had extra whitespace:', a.icon);
+    }
+    console.log('[DEBUG] getShape: using backend icon', iconTrimmed, 'for aircraft', a.id, a);
+    return iconTrimmed;
   }
   // Always normalize category and check CategoryIcons first for special categories
   let cat = a.category;
@@ -1463,30 +1468,42 @@ function getShape(a) {
     cat = cat.trim().toUpperCase();
   }
   if (cat && CategoryIcons[cat]) {
+    console.log('[DEBUG] getShape: using CategoryIcons', cat, 'for aircraft', a.id, a);
     return CategoryIcons[cat][0];
   }
 
   // Try normalized typecode
   let typecode = normalizeTypecode(a.typecode);
   if (typecode && TypeDesignatorIcons[typecode]) {
+    console.log('[DEBUG] getShape: using TypeDesignatorIcons', typecode, 'for aircraft', a.id, a);
     return TypeDesignatorIcons[typecode][0];
   }
   // Try typeDescription + WTC (5-char)
   if (a.typeDescription && a.wtc) {
     const descWtc = `${a.typeDescription.toUpperCase().trim()}-${String(a.wtc).toUpperCase().trim()}`;
-    if (TypeDescriptionIcons[descWtc]) return TypeDescriptionIcons[descWtc][0];
+    if (TypeDescriptionIcons[descWtc]) {
+      console.log('[DEBUG] getShape: using TypeDescriptionIcons (descWtc)', descWtc, 'for aircraft', a.id, a);
+      return TypeDescriptionIcons[descWtc][0];
+    }
   }
   // Try typeDescription (3-char)
   if (a.typeDescription) {
     const desc = a.typeDescription.toUpperCase().trim();
-    if (TypeDescriptionIcons[desc]) return TypeDescriptionIcons[desc][0];
+    if (TypeDescriptionIcons[desc]) {
+      console.log('[DEBUG] getShape: using TypeDescriptionIcons (desc)', desc, 'for aircraft', a.id, a);
+      return TypeDescriptionIcons[desc][0];
+    }
   }
   // Try typeDescription basic type letter (1-char)
   if (a.typeDescription) {
     const letter = a.typeDescription[0].toUpperCase();
-    if (TypeDescriptionIcons[letter]) return TypeDescriptionIcons[letter][0];
+    if (TypeDescriptionIcons[letter]) {
+      console.log('[DEBUG] getShape: using TypeDescriptionIcons (letter)', letter, 'for aircraft', a.id, a);
+      return TypeDescriptionIcons[letter][0];
+    }
   }
   // Fallback
+  console.warn('[DEBUG] getShape: fallback to unknown for aircraft', a.id, a);
   return 'unknown';
 }
 
@@ -2759,6 +2776,9 @@ function renderAircraft(viewer, aircraft) {
     const icon      = buildSvgUri(shape, color);
     const iconSizePx = ICON_SIZE_PX[shape] ?? ICON_SIZE_PX.generic;
     const cesColor  = Cesium.Color.fromCssColorString(color);
+    if (a.icon) {
+      console.log('[DEBUG] Aircraft', a.id, 'icon property:', a.icon, '| shape resolved:', shape);
+    }
 
     if (entityMap.has(a.id)) {
       const entity = entityMap.get(a.id);
