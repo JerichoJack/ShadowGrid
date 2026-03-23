@@ -1432,51 +1432,14 @@ function classificationColor(classification) {
   }
 }
 
-function aircraftColor(a) {
-  return classificationColor(classifyAircraft(a));
-}
-
-// Keep for HUD panel badge (mirrors classification color)
-function altitudeColor(altFt) { return '#00e676'; } // stub — no longer used for icons
-
-// ── Shape selection — tar1090 lookup priority ─────────────────────────────────
-// 1. Exact ICAO type designator (TypeDesignatorIcons)
-// 2. typeDescription + WTC (TypeDescriptionIcons, 5-char key)
-// 3. typeDescription alone (TypeDescriptionIcons, 3-char)
-// 4. typeDescription basic type letter (TypeDescriptionIcons, 1-char)
-// 5. ADS-B category (CategoryIcons)
-// 6. Altitude proxy (last resort)
-// Returns the shape *name* string (key into SHAPES).
-
-// Normalize ICAO typecode for lookup (uppercase, trim, strip dashes/spaces, handle common suffixes)
-function normalizeTypecode(typecode) {
-  if (!typecode) return '';
-  let t = String(typecode).toUpperCase().trim();
-  t = t.replace(/[-_\s]/g, '');
-  // Remove common airline-specific suffixes (e.g. A320-200 -> A320)
-  t = t.replace(/(\d{3,4}|[A-Z]{1,2})$/, (m, p1, o, s) => {
-    // If the prefix is a known type, keep it, else strip
-    if (TypeDesignatorIcons[t]) return t;
-    // Remove trailing numbers/letters if not a known type
-    return t.slice(0, 4);
-  });
-  // Special handling for MAX/NEO suffixes
-  t = t.replace(/(MAX|NEO)$/,'');
-  return t;
-}
-
-// Improved icon lookup logic
 function getShape(a) {
-  // If server provided icon, use it
-  if (a.icon) return a.icon;
-
+  // Use backend-enriched icon if present
+  if (a.icon && typeof a.icon === 'string' && a.icon !== 'unknown') {
+    return a.icon;
+  }
   // Always normalize category and check CategoryIcons first for special categories
   let cat = a.category;
-  // Map numeric emitter categories to string keys for CategoryIcons
   if (typeof cat === 'number' && Number.isFinite(cat)) {
-    // OpenSky/ADSB numeric emitter categories: 1=glider, 2=balloon, 4=ulac, 6=uav, etc.
-    // See https://opensky-network.org/apidoc/rest.html#response
-    // Map: 1->'B1', 2->'B2', 4->'B4', 6->'B6', 0->'A1', 3->'A3', 5->'A5', 7->'A7', etc.
     const numToCat = {
       0: 'A1', 1: 'B1', 2: 'B2', 3: 'A3', 4: 'B4', 5: 'A5', 6: 'B6', 7: 'A7',
       8: 'C0', 9: 'C1', 10: 'C2', 11: 'C3',
@@ -1490,7 +1453,7 @@ function getShape(a) {
   }
 
   // Try normalized typecode
-  const typecode = normalizeTypecode(a.typecode);
+  let typecode = normalizeTypecode(a.typecode);
   if (typecode && TypeDesignatorIcons[typecode]) {
     return TypeDesignatorIcons[typecode][0];
   }
@@ -2766,14 +2729,16 @@ function renderAircraft(viewer, aircraft) {
 
     const altMetres = a.altFt * 0.3048;
     const color     = aircraftColor(a);
-    const shape     = getShape(a);
+    // Use server-enriched icon if present, otherwise fall back to getShape
+    const shape = a.icon && SHAPES[a.icon] ? a.icon : getShape(a);
     if (!SHAPES[shape]) {
       console.warn('[flights.js] Unknown shape for aircraft:', {
         id: a.id,
         typecode: a.typecode,
         typeDescription: a.typeDescription,
         category: a.category,
-        resolvedShape: shape
+        resolvedShape: shape,
+        serverIcon: a.icon
       });
     }
     const classification = classifyAircraft(a);  // Get classification for visibility
