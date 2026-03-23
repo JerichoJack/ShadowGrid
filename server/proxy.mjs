@@ -1,8 +1,3 @@
-// ── Aircraft Debug Log Endpoint (Node.js HTTP version) ─────────────────────
-const logsDir = path.resolve(process.cwd(), 'logs');
-const aircraftDebugLogPath = path.join(logsDir, 'aircraft-debug.log');
-if (!fs.existsSync(logsDir)) fs.mkdirSync(logsDir, { recursive: true });
-
 // --- Aircraft Info Proxy Endpoint ---
 // Proxies requests to external aircraft info APIs to avoid CORS issues on the frontend.
 // Usage: GET /api/proxy/aircraft/:icao?callsign=XXX
