@@ -1,3 +1,5 @@
+import fs from 'fs';
+import path from 'path';
 // ── Aircraft Debug Log Endpoint (Node.js HTTP version) ─────────────────────
 const logsDir = path.resolve(process.cwd(), 'logs');
 const aircraftDebugLogPath = path.join(logsDir, 'aircraft-debug.log');
