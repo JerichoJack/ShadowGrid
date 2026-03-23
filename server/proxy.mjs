@@ -2,7 +2,7 @@
 // Proxies requests to external aircraft info APIs to avoid CORS issues on the frontend.
 // Usage: GET /api/proxy/aircraft/:icao?callsign=XXX
 const AIRCRAFT_INFO_APIS = [
-  (icao) => `https://api.adsbdb.com/v0/aircraft/icao/${icao}`,
+  (icao) => `https://api.adsbdb.com/v0/aircraft/${icao}`,
   (icao) => `https://api.hexdb.io/api/v1/aircraft/${icao}`,
   (icao) => `https://api.adsb.lol/v2/aircraft/${icao}`,
 ];
