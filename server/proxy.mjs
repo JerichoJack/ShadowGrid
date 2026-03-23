@@ -3,28 +3,6 @@ const logsDir = path.resolve(process.cwd(), 'logs');
 const aircraftDebugLogPath = path.join(logsDir, 'aircraft-debug.log');
 if (!fs.existsSync(logsDir)) fs.mkdirSync(logsDir, { recursive: true });
 
-// Patch the main HTTP server to handle POST /api/logs/aircraft-debug
-const originalHandler = globalThis.shadowgridMainHandler;
-globalThis.shadowgridMainHandler = function(req, res) {
-  if (req.method === 'POST' && req.url === '/api/logs/aircraft-debug') {
-    let body = '';
-    req.on('data', chunk => { body += chunk; });
-    req.on('end', () => {
-      try {
-        const entry = JSON.parse(body);
-        entry.receivedAt = new Date().toISOString();
-        fs.appendFileSync(aircraftDebugLogPath, JSON.stringify(entry) + '\n');
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ ok: true }));
-      } catch (err) {
-        res.writeHead(500, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ ok: false, error: err.message }));
-      }
-    });
-    return;
-  }
-  if (typeof originalHandler === 'function') return originalHandler(req, res);
-}
 // --- Aircraft Info Proxy Endpoint ---
 // Proxies requests to external aircraft info APIs to avoid CORS issues on the frontend.
 // Usage: GET /api/proxy/aircraft/:icao?callsign=XXX
@@ -5700,6 +5678,7 @@ server.listen(PORT, () => {
     '/api/satellite-imagery/preview',
     '/api/satellites/snapshot',
     '/api/aircraftdb (POST)',
+    '/api/logs/aircraft-debug (POST)',
     '/health',
   ];
   const baseUrls = [
