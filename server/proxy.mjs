@@ -1,37 +1,30 @@
-// ── Aircraft Debug Log Endpoint ─────────────────────────────────────────────
-import express from 'express';
+// ── Aircraft Debug Log Endpoint (Node.js HTTP version) ─────────────────────
 const logsDir = path.resolve(process.cwd(), 'logs');
 const aircraftDebugLogPath = path.join(logsDir, 'aircraft-debug.log');
+if (!fs.existsSync(logsDir)) fs.mkdirSync(logsDir, { recursive: true });
 
-// Ensure logs directory exists
-if (!fs.existsSync(logsDir)) {
-  fs.mkdirSync(logsDir, { recursive: true });
-}
-
-// If using Express, add this route to your app:
-// (If not, adapt to your router/server setup)
-let app;
-try {
-  app = globalThis.app || globalThis.expressApp || undefined;
-} catch {}
-
-if (app && typeof app.post === 'function') {
-  app.post('/api/logs/aircraft-debug', express.json(), (req, res) => {
-    const entry = {
-      ...req.body,
-      receivedAt: new Date().toISOString(),
-      ip: req.ip || req.connection?.remoteAddress || null
-    };
-    fs.appendFile(aircraftDebugLogPath, JSON.stringify(entry) + '\n', err => {
-      if (err) {
-        res.status(500).json({ ok: false, error: 'Failed to write log' });
-      } else {
-        res.json({ ok: true });
+// Patch the main HTTP server to handle POST /api/logs/aircraft-debug
+const originalHandler = globalThis.shadowgridMainHandler;
+globalThis.shadowgridMainHandler = function(req, res) {
+  if (req.method === 'POST' && req.url === '/api/logs/aircraft-debug') {
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', () => {
+      try {
+        const entry = JSON.parse(body);
+        entry.receivedAt = new Date().toISOString();
+        fs.appendFileSync(aircraftDebugLogPath, JSON.stringify(entry) + '\n');
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true }));
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, error: err.message }));
       }
     });
-  });
+    return;
+  }
+  if (typeof originalHandler === 'function') return originalHandler(req, res);
 }
-// If not using Express, you may need to manually add this handler to your HTTP server/router.
 // --- Aircraft Info Proxy Endpoint ---
 // Proxies requests to external aircraft info APIs to avoid CORS issues on the frontend.
 // Usage: GET /api/proxy/aircraft/:icao?callsign=XXX
