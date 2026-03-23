@@ -1589,41 +1589,46 @@ function classifyAircraftServer(a) {
 }
 
 function enrichAircraftFromDb(a) {
-  const icao24 = (a.icao24 ?? a.hex ?? '').toLowerCase();
-  if (!icao24) return;
-  // Aggressively fill typecode from all possible sources
-  a.typecode = (
-    a.typecode || a.Typecode || a.t || a.type || a.aircraftType || ''
-  ).toString().toUpperCase().trim();
-
-  // Try to fill from aircraftDb if still missing
-  const db = aircraftDb[icao24];
-  if (db) {
-    if (!a.typecode && db.typecode) a.typecode = db.typecode.toUpperCase();
-    if (!a.manufacturer && db.manufacturer) a.manufacturer = db.manufacturer;
-    if (!a.model && db.model) a.model = db.model;
-    if (!a.category && db.category) a.category = db.category;
-  }
-
-  // Try to infer typecode from model or manufacturer if still missing
-  if (!a.typecode && a.model && typeof a.model === 'string') {
-    const m = a.model.match(/\(([A-Z0-9]{3,5})\)/);
-    if (m) a.typecode = m[1].toUpperCase();
-  }
-
-  // Try to fill from typeDb if possible
-  const typecode = (a.typecode || '').toUpperCase();
-  const typeInfo = typeDb[typecode];
-  if (typeInfo) {
-    if (!a.engineCount && typeInfo.engineCount) a.engineCount = typeInfo.engineCount;
-    if (!a.engineType && typeInfo.engineType) a.engineType = typeInfo.engineType;
-    if (!a.modelFullName && typeInfo.modelFullName) a.modelFullName = typeInfo.modelFullName;
-    if (!a.wtc && typeInfo.wtc) a.wtc = typeInfo.wtc;
-    if (!a.typeDescription && typeInfo.description) a.typeDescription = typeInfo.description;
-    if (!a.manufacturerCode && typeInfo.manufacturerCode) a.manufacturerCode = typeInfo.manufacturerCode;
-  }
-  const mcode = (a.manufacturerCode || '').toUpperCase();
-  if (mcode && manufacturerDb[mcode] && !a.manufacturer) a.manufacturer = manufacturerDb[mcode];
+    // --- Fallback enrichment for missing info fields ---
+    // Try to fill missing operator, country, manufacturer, model from aircraftDb or typeDb
+    const icao24 = (a.icao24 || a.icao || a.hex || '').toLowerCase();
+    if (!icao24) return;
+    let db = aircraftDb[icao24];
+    let typecode = (a.typecode || '').toUpperCase();
+    let typeInfo = typeDb[typecode];
+    if (db) {
+      if (!a.operator && db.operator) a.operator = db.operator;
+      if (!a.country && db.country) a.country = db.country;
+      if (!a.manufacturer && db.manufacturer) a.manufacturer = db.manufacturer;
+      if (!a.model && db.model) a.model = db.model;
+      if (!a.typecode && db.typecode) a.typecode = db.typecode.toUpperCase();
+      if (!a.category && db.category) a.category = db.category;
+    }
+    // Aggressively fill typecode from all possible sources
+    a.typecode = (
+      a.typecode || a.Typecode || a.t || a.type || a.aircraftType || ''
+    ).toString().toUpperCase().trim();
+    typecode = a.typecode;
+    typeInfo = typeDb[typecode];
+    // Try to infer typecode from model or manufacturer if still missing
+    if (!a.typecode && a.model && typeof a.model === 'string') {
+      const m = a.model.match(/\(([A-Z0-9]{3,5})\)/);
+      if (m) a.typecode = m[1].toUpperCase();
+    }
+    if (typeInfo) {
+      if (!a.manufacturer && typeInfo.manufacturer) a.manufacturer = typeInfo.manufacturer;
+      if (!a.model && typeInfo.model) a.model = typeInfo.model;
+      if (!a.operator && typeInfo.operator) a.operator = typeInfo.operator;
+      if (!a.country && typeInfo.country) a.country = typeInfo.country;
+      if (!a.engineCount && typeInfo.engineCount) a.engineCount = typeInfo.engineCount;
+      if (!a.engineType && typeInfo.engineType) a.engineType = typeInfo.engineType;
+      if (!a.modelFullName && typeInfo.modelFullName) a.modelFullName = typeInfo.modelFullName;
+      if (!a.wtc && typeInfo.wtc) a.wtc = typeInfo.wtc;
+      if (!a.typeDescription && typeInfo.description) a.typeDescription = typeInfo.description;
+      if (!a.manufacturerCode && typeInfo.manufacturerCode) a.manufacturerCode = typeInfo.manufacturerCode;
+    }
+    const mcode = (a.manufacturerCode || '').toUpperCase();
+    if (mcode && manufacturerDb[mcode] && !a.manufacturer) a.manufacturer = manufacturerDb[mcode];
 
   // --- Icon/Scale enrichment (tar1090 hierarchy) ---
   // Normalize category and check CategoryIcons first
