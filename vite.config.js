@@ -95,6 +95,12 @@ export default defineConfig({
         changeOrigin: true,
         rewrite:     path => path.replace(/^\/api\/google-routes/, ''),
       },
+      // -- Logs --
+      '/api/logs': {
+        target: 'http://localhost:3001',
+        changeOrigin: true,
+        rewrite: path => path,
+      },
     },
   },
 
