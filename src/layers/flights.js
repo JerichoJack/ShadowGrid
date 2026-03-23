@@ -1506,7 +1506,11 @@ function getShape(a) {
   console.warn('[DEBUG] getShape: fallback to unknown for aircraft', a.id, a);
   // Fire-and-forget fetch to log full aircraft API data
   if (a.id) {
-    const serverUrl = 'http://192.168.4.218:3001/api/proxy/aircraft/' + encodeURIComponent(a.id);
+    // Use a dynamic API base URL if available, fallback to relative path
+    const apiBase = (typeof window !== 'undefined' && window.SHADOWGRID_API_BASE_URL)
+      ? window.SHADOWGRID_API_BASE_URL
+      : '';
+    const serverUrl = apiBase + '/api/proxy/aircraft/' + encodeURIComponent(a.id);
     try {
       fetch(serverUrl)
         .then(r => r.json())
