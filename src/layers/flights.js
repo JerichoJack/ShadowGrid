@@ -1,3 +1,13 @@
+/**
+ * Normalizes an ICAO typecode string for aircraft, using the same logic as the server.
+ * This is a minimal client-side version to resolve errors when called.
+ * @param {string} typecode
+ * @returns {string} Normalized typecode (uppercase, trimmed, fallback to empty string)
+ */
+function normalizeTypecode(typecode) {
+  if (!typecode) return '';
+  return String(typecode).toUpperCase().trim();
+}
 
 // No-op: enrichment is now server-side
 function enrichAircraftFromDb(a) {}
