@@ -2347,7 +2347,7 @@ async function fetchAircraftInfo(icao, callsign) {
 
   const info = { registration: null, typecode: null, typeDesc: null, operator: null, route: null, country: null, year: null, manufacturer: null, model: null };
 
-  // 1. Static aircraft info (cached permanently per ICAO24)
+  // Only use static aircraft info (cached permanently per ICAO24)
   if (aircraftCache.has(icao)) {
     Object.assign(info, aircraftCache.get(icao));
   } else {
@@ -2375,6 +2375,7 @@ async function fetchAircraftInfo(icao, callsign) {
           info.year         = a.year ?? a.year_built ?? null;
           info.manufacturer = a.manufacturer ?? null;
           info.model        = a.model ?? null;
+          info.route        = a.route ?? null; // If present in the aircraft endpoint
         } else {
           proxyFailed = true;
         }
@@ -2403,47 +2404,6 @@ async function fetchAircraftInfo(icao, callsign) {
       // Optionally, could fetch from a local endpoint if needed
     }
     aircraftCache.set(icao, { ...info, dbOnly });
-  }
-
-  // ── 2. Live route lookup by callsign (short TTL cache) ────────────────────
-  // Routes change per flight so we cache by callsign with a 5-min TTL,
-  // NOT by ICAO (which would show yesterday's route for today's flight).
-  // Only attempt lookup for proper airline-style callsigns (e.g. UAL123, BAW456)
-  // Skip tail numbers and other non-airline identifiers
-  if (callsign && callsign.length >= 4) {
-    // Validate callsign is in airline format: 2-3 letters + 1-4 digits (+ optional letter)
-    // Valid: UAL123, BAW456, RYR22A, Invalid: 405LP, N404LP, TEST
-    // Airline callsigns are 2-3 letters + 1-4 digits + optional suffix letter.
-    // Also reject 6-char hex-looking strings (e.g. ICAO addresses like CEF05F)
-    // by requiring at least one non-hex digit (G-Z range) in the letter prefix.
-    const isAirlineCallsign = /^[A-Z]{2,3}\d{1,4}[A-Z]{0,2}$/.test(callsign)
-      && callsign.length <= 9
-      && !/^[0-9A-F]{6}$/i.test(callsign);
-    if (isAirlineCallsign) {
-      const cached = routeCache.get(callsign);
-      if (cached && Date.now() - cached.ts < ROUTE_TTL) {
-        info.route    = cached.route;
-        if (!info.operator) info.operator = cached.operator;
-      } else {
-        try {
-          const r = await fetch(`https://api.adsbdb.com/v0/callsign/${callsign}`, { signal: AbortSignal.timeout(4000) });
-          if (r.ok) {
-            const d  = await r.json();
-            const fl = d.response?.flightroute;
-            if (fl) {
-              const orig = fl.origin?.iata_code      ?? fl.origin?.icao_code      ?? '';
-              const dest = fl.destination?.iata_code ?? fl.destination?.icao_code ?? '';
-              info.route = (orig && dest) ? `${orig} → ${dest}` : null;
-              const airline = fl.airline?.name ?? null;
-              if (!info.operator && airline) info.operator = airline;
-              routeCache.set(callsign, { route: info.route, operator: airline, ts: Date.now() });
-            }
-          }
-        } catch (err) {
-          console.warn(`[fetchAircraftInfo] adsbdb.com route fetch failed for callsign: ${callsign}`, err);
-        }
-      }
-    }
   }
 
   // Ensure all fields are safe defaults (never undefined)
