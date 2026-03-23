@@ -1472,7 +1472,19 @@ function getShape(a) {
 
   // Always normalize category and check CategoryIcons first for special categories
   let cat = a.category;
-  if (cat && typeof cat === 'string') cat = cat.trim().toUpperCase();
+  // Map numeric emitter categories to string keys for CategoryIcons
+  if (typeof cat === 'number' && Number.isFinite(cat)) {
+    // OpenSky/ADSB numeric emitter categories: 1=glider, 2=balloon, 4=ulac, 6=uav, etc.
+    // See https://opensky-network.org/apidoc/rest.html#response
+    // Map: 1->'B1', 2->'B2', 4->'B4', 6->'B6', 0->'A1', 3->'A3', 5->'A5', 7->'A7', etc.
+    const numToCat = {
+      0: 'A1', 1: 'B1', 2: 'B2', 3: 'A3', 4: 'B4', 5: 'A5', 6: 'B6', 7: 'A7',
+      8: 'C0', 9: 'C1', 10: 'C2', 11: 'C3',
+    };
+    cat = numToCat[cat] || String(cat);
+  } else if (typeof cat === 'string') {
+    cat = cat.trim().toUpperCase();
+  }
   if (cat && CategoryIcons[cat]) {
     return CategoryIcons[cat][0];
   }

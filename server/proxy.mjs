@@ -1603,7 +1603,16 @@ function enrichAircraftFromDb(a) {
   // --- Icon/Scale enrichment (tar1090 hierarchy) ---
   // Normalize category and check CategoryIcons first
   let cat = a.category;
-  if (cat && typeof cat === 'string') cat = cat.trim().toUpperCase();
+  // Map numeric emitter categories to string keys for CategoryIcons
+  if (typeof cat === 'number' && Number.isFinite(cat)) {
+    const numToCat = {
+      0: 'A1', 1: 'B1', 2: 'B2', 3: 'A3', 4: 'B4', 5: 'A5', 6: 'B6', 7: 'A7',
+      8: 'C0', 9: 'C1', 10: 'C2', 11: 'C3',
+    };
+    cat = numToCat[cat] || String(cat);
+  } else if (typeof cat === 'string') {
+    cat = cat.trim().toUpperCase();
+  }
   if (cat && CategoryIcons[cat]) {
     const entry = CategoryIcons[cat];
     a.icon = entry[0];
