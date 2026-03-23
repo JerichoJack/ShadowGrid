@@ -2360,13 +2360,17 @@ async function fetchAircraftInfo(icao, callsign) {
         const d = await r.json();
         console.log('[fetchAircraftInfo] Proxy response:', d);
         if (d && d.ok && d.result) {
-          // Map common fields from proxy result
-          const a = d.result;
-          info.registration = a.registration ?? a.Registration ?? null;
-          info.typecode     = a.typecode ?? a.type_code ?? a.ICAOTypeCode ?? null;
+          // Support nested adsbdb.com/hexdb/adsb.lol response structures
+          let a = d.result;
+          // If adsbdb.com, info is under result.response.aircraft
+          if (a.response && a.response.aircraft) {
+            a = a.response.aircraft;
+          }
+          info.registration = a.registration ?? a.Registration ?? a.mode_s ?? null;
+          info.typecode     = a.typecode ?? a.type_code ?? a.icao_type ?? a.ICAOTypeCode ?? null;
           info.typeDesc     = a.typeDesc ?? a.typeDescription ?? a.type ?? null;
           info.operator     = a.operator ?? a.registered_owner ?? a.RegisteredOwners ?? null;
-          info.country      = a.country ?? a.registered_owner_country_iso_name ?? a.Country ?? null;
+          info.country      = a.country ?? a.registered_owner_country_iso_name ?? a.registered_owner_country_name ?? a.Country ?? null;
           info.year         = a.year ?? a.year_built ?? null;
           info.manufacturer = a.manufacturer ?? null;
           info.model        = a.model ?? null;
