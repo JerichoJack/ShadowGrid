@@ -1453,7 +1453,7 @@ function getShape(a) {
     if (iconTrimmed !== a.icon) {
       console.warn('[DEBUG] getShape: icon had extra whitespace:', a.icon);
     }
-    console.log('[DEBUG] getShape: using backend icon', iconTrimmed, 'for aircraft', a.id, a);
+    // console.log('[DEBUG] getShape: using backend icon', iconTrimmed, 'for aircraft', a.id, a);
     return iconTrimmed;
   }
   // Always normalize category and check CategoryIcons first for special categories
@@ -1468,21 +1468,21 @@ function getShape(a) {
     cat = cat.trim().toUpperCase();
   }
   if (cat && CategoryIcons[cat]) {
-    console.log('[DEBUG] getShape: using CategoryIcons', cat, 'for aircraft', a.id, a);
+    // console.log('[DEBUG] getShape: using CategoryIcons', cat, 'for aircraft', a.id, a);
     return CategoryIcons[cat][0];
   }
 
   // Try normalized typecode
   let typecode = normalizeTypecode(a.typecode);
   if (typecode && TypeDesignatorIcons[typecode]) {
-    console.log('[DEBUG] getShape: using TypeDesignatorIcons', typecode, 'for aircraft', a.id, a);
+    // console.log('[DEBUG] getShape: using TypeDesignatorIcons', typecode, 'for aircraft', a.id, a);
     return TypeDesignatorIcons[typecode][0];
   }
   // Try typeDescription + WTC (5-char)
   if (a.typeDescription && a.wtc) {
     const descWtc = `${a.typeDescription.toUpperCase().trim()}-${String(a.wtc).toUpperCase().trim()}`;
     if (TypeDescriptionIcons[descWtc]) {
-      console.log('[DEBUG] getShape: using TypeDescriptionIcons (descWtc)', descWtc, 'for aircraft', a.id, a);
+      // console.log('[DEBUG] getShape: using TypeDescriptionIcons (descWtc)', descWtc, 'for aircraft', a.id, a);
       return TypeDescriptionIcons[descWtc][0];
     }
   }
@@ -1490,7 +1490,7 @@ function getShape(a) {
   if (a.typeDescription) {
     const desc = a.typeDescription.toUpperCase().trim();
     if (TypeDescriptionIcons[desc]) {
-      console.log('[DEBUG] getShape: using TypeDescriptionIcons (desc)', desc, 'for aircraft', a.id, a);
+      // console.log('[DEBUG] getShape: using TypeDescriptionIcons (desc)', desc, 'for aircraft', a.id, a);
       return TypeDescriptionIcons[desc][0];
     }
   }
@@ -1498,12 +1498,27 @@ function getShape(a) {
   if (a.typeDescription) {
     const letter = a.typeDescription[0].toUpperCase();
     if (TypeDescriptionIcons[letter]) {
-      console.log('[DEBUG] getShape: using TypeDescriptionIcons (letter)', letter, 'for aircraft', a.id, a);
+      // console.log('[DEBUG] getShape: using TypeDescriptionIcons (letter)', letter, 'for aircraft', a.id, a);
       return TypeDescriptionIcons[letter][0];
     }
   }
   // Fallback
   console.warn('[DEBUG] getShape: fallback to unknown for aircraft', a.id, a);
+  // Fire-and-forget fetch to log full aircraft API data
+  if (a.id) {
+    try {
+      fetch(`/api/proxy/aircraft/${encodeURIComponent(a.id)}`)
+        .then(r => r.json())
+        .then(data => {
+          console.warn(`[DEBUG] /api/proxy/aircraft/${a.id} response:`, data);
+        })
+        .catch(err => {
+          console.warn(`[DEBUG] /api/proxy/aircraft/${a.id} fetch error:`, err);
+        });
+    } catch (err) {
+      console.warn(`[DEBUG] /api/proxy/aircraft/${a.id} fetch exception:`, err);
+    }
+  }
   return 'unknown';
 }
 
