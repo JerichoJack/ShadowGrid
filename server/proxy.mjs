@@ -1,3 +1,37 @@
+// ── Aircraft Debug Log Endpoint ─────────────────────────────────────────────
+import express from 'express';
+const logsDir = path.resolve(process.cwd(), 'logs');
+const aircraftDebugLogPath = path.join(logsDir, 'aircraft-debug.log');
+
+// Ensure logs directory exists
+if (!fs.existsSync(logsDir)) {
+  fs.mkdirSync(logsDir, { recursive: true });
+}
+
+// If using Express, add this route to your app:
+// (If not, adapt to your router/server setup)
+let app;
+try {
+  app = globalThis.app || globalThis.expressApp || undefined;
+} catch {}
+
+if (app && typeof app.post === 'function') {
+  app.post('/api/logs/aircraft-debug', express.json(), (req, res) => {
+    const entry = {
+      ...req.body,
+      receivedAt: new Date().toISOString(),
+      ip: req.ip || req.connection?.remoteAddress || null
+    };
+    fs.appendFile(aircraftDebugLogPath, JSON.stringify(entry) + '\n', err => {
+      if (err) {
+        res.status(500).json({ ok: false, error: 'Failed to write log' });
+      } else {
+        res.json({ ok: true });
+      }
+    });
+  });
+}
+// If not using Express, you may need to manually add this handler to your HTTP server/router.
 // --- Aircraft Info Proxy Endpoint ---
 // Proxies requests to external aircraft info APIs to avoid CORS issues on the frontend.
 // Usage: GET /api/proxy/aircraft/:icao?callsign=XXX
