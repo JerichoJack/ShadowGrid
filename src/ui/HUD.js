@@ -2226,24 +2226,26 @@ function initEntityPicker(viewer) {
 
       // --- Auto-post enriched aircraft info to proxy for database update ---
       try {
-        const postData = {
-          icao24: icao.toLowerCase(),
-          registration: info.registration || '',
-          typecode: info.typecode || '',
-          manufacturer: info.manufacturer || '',
-          model: info.model || '',
-          operator: info.operator || '',
-          country: info.country || '',
-        };
-        // Only POST if at least one of typecode or model is a real value (not empty or placeholder)
-        const validTypecode = postData.typecode && postData.typecode !== '' && postData.typecode !== '—';
-        const validModel = postData.model && postData.model !== '' && postData.model !== '—';
-        if (validTypecode || validModel) {
-          fetch(`${BACKEND_BASE_URL}/api/aircraftdb`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(postData),
-          });
+        if (icao && typeof icao === 'string' && icao.trim() !== '') {
+          const postData = {
+            icao24: icao.toLowerCase(),
+            registration: info.registration || '',
+            typecode: info.typecode || '',
+            manufacturer: info.manufacturer || '',
+            model: info.model || '',
+            operator: info.operator || '',
+            country: info.country || '',
+          };
+          // Only POST if at least one of typecode or model is a real value (not empty or placeholder)
+          const validTypecode = postData.typecode && postData.typecode !== '' && postData.typecode !== '—';
+          const validModel = postData.model && postData.model !== '' && postData.model !== '—';
+          if (validTypecode || validModel) {
+            fetch(`${BACKEND_BASE_URL}/api/aircraftdb`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(postData),
+            });
+          }
         }
       } catch (err) {
         // Silent fail; do not block UI
