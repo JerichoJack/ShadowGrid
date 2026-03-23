@@ -1,4 +1,3 @@
-
 import http from 'http';
 import fs from 'fs';
 import path from 'path';
@@ -4941,11 +4940,14 @@ async function handleFlights(query, res) {
 
 // ── HTTP server ───────────────────────────────────────────────────────────────
 
+const getAircraftDebugLogPath = () => {
+  const logsDir = path.resolve(process.cwd(), 'logs');
+  if (!fs.existsSync(logsDir)) fs.mkdirSync(logsDir, { recursive: true });
+  return path.join(logsDir, 'aircraft-debug.log');
+};
+
 const server = http.createServer(async (req, res) => {
     // Aircraft Debug Log Endpoint
-    const logsDir = path.resolve(process.cwd(), 'logs');
-    const aircraftDebugLogPath = path.join(logsDir, 'aircraft-debug.log');
-    if (!fs.existsSync(logsDir)) fs.mkdirSync(logsDir, { recursive: true });
     if (req.method === 'POST' && req.url === '/api/logs/aircraft-debug') {
       let body = '';
       req.on('data', chunk => { body += chunk; });
@@ -4953,6 +4955,7 @@ const server = http.createServer(async (req, res) => {
         try {
           const entry = JSON.parse(body);
           entry.receivedAt = new Date().toISOString();
+          const aircraftDebugLogPath = getAircraftDebugLogPath();
           fs.appendFileSync(aircraftDebugLogPath, JSON.stringify(entry) + '\n');
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ ok: true }));
