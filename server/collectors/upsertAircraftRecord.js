@@ -8,7 +8,7 @@ import { stringify as csvStringify } from 'csv-stringify/sync';
 
 const __filename = new URL(import.meta.url).pathname;
 const __dirname = path.dirname(__filename);
-const DB_PATH = path.resolve(__dirname, '../public/aircraft-database-files/aircraftDatabase-New.csv');
+const DB_PATH = path.resolve(__dirname, '../../public/aircraft-database-files/aircraftDatabase-New.csv');
 
 /**
  * Upsert an aircraft record in the CSV database.
