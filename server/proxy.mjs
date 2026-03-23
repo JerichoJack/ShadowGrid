@@ -1,3 +1,15 @@
+
+import http from 'http';
+import fs from 'fs';
+import path from 'path';
+import crypto from 'crypto';
+import { spawn } from 'child_process';
+import * as satellite from 'satellite.js';
+import { cellToBoundary } from 'h3-js';
+import { feature as topojsonFeature } from 'topojson-client';
+import { upsertAircraftRecord } from './collectors/upsertAircraftRecord.js';
+import { parse as csvParse } from 'csv-parse/sync';
+
 // --- Aircraft Info Proxy Endpoint ---
 // Proxies requests to external aircraft info APIs to avoid CORS issues on the frontend.
 // Usage: GET /api/proxy/aircraft/:icao?callsign=XXX
@@ -57,41 +69,6 @@ async function fetchAircraftInfoFromApis(icao, callsign) {
   }
   return { ok: false, icao, callsign, error: 'No data found from external APIs' };
 }
-// Dynamic aircraft database updater
-import { upsertAircraftRecord } from './collectors/upsertAircraftRecord.js';
-// API endpoint: POST /api/aircraftdb
-// Body: { icao24, registration, typecode, manufacturer, model, operator, country }
-// ...existing code...
-/**
- * server/proxy.mjs
- * ShadowGrid flight data proxy — viewport-aware, on-demand hub fetching.
- *
- * The browser sends the visible bounding box with each request:
- *   GET /api/flights?bounds=minLon,minLat,maxLon,maxLat
- *
- * The proxy computes which 250nm-radius hubs overlap that bbox, fetches only
- * those hubs from opendata.adsb.fi, merges results into a persistent DB, and
- * returns the full DB snapshot filtered to the bbox.
- *
- * Hub results are cached individually per hub (TTL: 12s) so panning doesn't
- * re-fetch hubs that were just queried. The DB also retains aircraft globally
- * so previously-seen aircraft outside the viewport are preserved for when the
- * user pans back.
- *
- * Start:  node server/proxy.mjs
- */
-
-import http from 'http';
-import fs from 'fs';
-import path from 'path';
-import crypto from 'crypto';
-import { spawn } from 'child_process';
-import * as satellite from 'satellite.js';
-import { cellToBoundary } from 'h3-js';
-import { feature as topojsonFeature } from 'topojson-client';
-
-// ── Aircraft DB (server-side enrichment) ──
-import { parse as csvParse } from 'csv-parse/sync';
 
 const AIRCRAFT_CSV_PATHS = [
   path.resolve(process.cwd(), 'public', 'aircraft-database-files', 'aircraftDatabase-New.csv'),
