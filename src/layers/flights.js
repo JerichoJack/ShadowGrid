@@ -1432,6 +1432,23 @@ function classificationColor(classification) {
   }
 }
 
+// Normalize ICAO typecode for lookup (uppercase, trim, strip dashes/spaces, handle common suffixes)
+function normalizeTypecode(typecode) {
+  if (!typecode) return '';
+  let t = String(typecode).toUpperCase().trim();
+  t = t.replace(/[-_\s]/g, '');
+  // Remove common airline-specific suffixes (e.g. A320-200 -> A320)
+  t = t.replace(/(\d{3,4}|[A-Z]{1,2})$/, (m, p1, o, s) => {
+    // If the prefix is a known type, keep it, else strip
+    if (TypeDesignatorIcons[t]) return t;
+    // Remove trailing numbers/letters if not a known type
+    return t.slice(0, 4);
+  });
+  // Special handling for MAX/NEO suffixes
+  t = t.replace(/(MAX|NEO)$/,'');
+  return t;
+}
+
 function getShape(a) {
   // Use backend-enriched icon if present
   if (a.icon && typeof a.icon === 'string' && a.icon !== 'unknown') {
