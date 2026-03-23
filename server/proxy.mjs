@@ -1601,91 +1601,91 @@ function enrichAircraftFromDb(a) {
   if (mcode && manufacturerDb[mcode] && !a.manufacturer) a.manufacturer = manufacturerDb[mcode];
 
   // --- Icon/Scale enrichment (tar1090 hierarchy) ---
-  let iconEntry = typeDesignatorIcons[typecode];
-  if (iconEntry) {
-    a.icon = iconEntry[0];
-    a.iconScale = iconEntry[1];
+  // Normalize category and check CategoryIcons first
+  let cat = a.category;
+  if (cat && typeof cat === 'string') cat = cat.trim().toUpperCase();
+  if (cat && CategoryIcons[cat]) {
+    const entry = CategoryIcons[cat];
+    a.icon = entry[0];
+    a.iconScale = entry[1];
   } else {
-    const td = (a.typeDescription || '').toUpperCase().trim();
-    const wtc = (a.wtc || '').toUpperCase().trim();
-    let found = false;
-    if (td.length === 3) {
-      if (wtc.length === 1) {
-        const key5 = td + '-' + wtc;
-        if (key5 === 'L2J-M' && a.category && a.category.toUpperCase() === 'A2') {
-          a.icon = 'jet_swept';
-          a.iconScale = 1;
-          found = true;
-        } else if (TypeDescriptionIcons[key5]) {
-          const entry = TypeDescriptionIcons[key5];
+    let iconEntry = typeDesignatorIcons[typecode];
+    if (iconEntry) {
+      a.icon = iconEntry[0];
+      a.iconScale = iconEntry[1];
+    } else {
+      const td = (a.typeDescription || '').toUpperCase().trim();
+      const wtc = (a.wtc || '').toUpperCase().trim();
+      let found = false;
+      if (td.length === 3) {
+        if (wtc.length === 1) {
+          const key5 = td + '-' + wtc;
+          if (key5 === 'L2J-M' && cat === 'A2') {
+            a.icon = 'jet_swept';
+            a.iconScale = 1;
+            found = true;
+          } else if (TypeDescriptionIcons[key5]) {
+            const entry = TypeDescriptionIcons[key5];
+            a.icon = entry[0];
+            a.iconScale = entry[1];
+            found = true;
+          }
+        }
+        if (!found && TypeDescriptionIcons[td]) {
+          const entry = TypeDescriptionIcons[td];
           a.icon = entry[0];
           a.iconScale = entry[1];
           found = true;
         }
-      }
-      if (!found && TypeDescriptionIcons[td]) {
+        if (!found) {
+          const basicType = td.charAt(0);
+          if (TypeDescriptionIcons[basicType]) {
+            const entry = TypeDescriptionIcons[basicType];
+            a.icon = entry[0];
+            a.iconScale = entry[1];
+            found = true;
+          }
+        }
+      } else if (td.length === 1 && TypeDescriptionIcons[td]) {
         const entry = TypeDescriptionIcons[td];
         a.icon = entry[0];
         a.iconScale = entry[1];
         found = true;
       }
-      if (!found) {
-        const basicType = td.charAt(0);
-        if (TypeDescriptionIcons[basicType]) {
-          const entry = TypeDescriptionIcons[basicType];
-          a.icon = entry[0];
-          a.iconScale = entry[1];
+      if (!found && typecode) {
+        if (/^H\d/.test(typecode) || /^S(6|7|9)\d/.test(typecode) || /^(EC|BO|BK|AS|AW|MD9)/.test(typecode)) {
+          a.icon = 'helicopter';
+          a.iconScale = 1;
+          found = true;
+        } else if (/^(B74|B77|A38|A34)/.test(typecode)) {
+          a.icon = 'heavy_4e';
+          a.iconScale = 1;
+          found = true;
+        } else if (/^(B76|B78|A3[03]|A35)/.test(typecode)) {
+          a.icon = 'heavy_2e';
+          a.iconScale = 1;
+          found = true;
+        } else if (/^(B7|A3|E1|E17|E19|CRJ|RJ|F\d)/.test(typecode)) {
+          a.icon = 'airliner';
+          a.iconScale = 1;
           found = true;
         }
       }
-    } else if (td.length === 1 && TypeDescriptionIcons[td]) {
-      const entry = TypeDescriptionIcons[td];
-      a.icon = entry[0];
-      a.iconScale = entry[1];
-      found = true;
-    }
-    if (!found) {
-      const cat = (a.category || '').toUpperCase().trim();
-      if (cat && CategoryIcons[cat]) {
-        const entry = CategoryIcons[cat];
-        a.icon = entry[0];
-        a.iconScale = entry[1];
-        found = true;
-      }
-    }
-    if (!found && typecode) {
-      if (/^H\d/.test(typecode) || /^S(6|7|9)\d/.test(typecode) || /^(EC|BO|BK|AS|AW|MD9)/.test(typecode)) {
-        a.icon = 'helicopter';
-        a.iconScale = 1;
-        found = true;
-      } else if (/^(B74|B77|A38|A34)/.test(typecode)) {
-        a.icon = 'heavy_4e';
-        a.iconScale = 1;
-        found = true;
-      } else if (/^(B76|B78|A3[03]|A35)/.test(typecode)) {
-        a.icon = 'heavy_2e';
-        a.iconScale = 1;
-        found = true;
-      } else if (/^(B7|A3|E1|E17|E19|CRJ|RJ|F\d)/.test(typecode)) {
-        a.icon = 'airliner';
-        a.iconScale = 1;
-        found = true;
-      }
-    }
-    if (!found) {
-      const alt = a.altFt ?? 0;
-      if (alt > 25000) {
-        a.icon = 'airliner';
-        a.iconScale = 1;
-      } else if (alt > 5000) {
-        a.icon = 'twin_large';
-        a.iconScale = 1;
-      } else if (alt > 0) {
-        a.icon = 'cessna';
-        a.iconScale = 1;
-      } else {
-        a.icon = 'unknown';
-        a.iconScale = 1;
+      if (!found) {
+        const alt = a.altFt ?? 0;
+        if (alt > 25000) {
+          a.icon = 'airliner';
+          a.iconScale = 1;
+        } else if (alt > 5000) {
+          a.icon = 'twin_large';
+          a.iconScale = 1;
+        } else if (alt > 0) {
+          a.icon = 'cessna';
+          a.iconScale = 1;
+        } else {
+          a.icon = 'unknown';
+          a.iconScale = 1;
+        }
       }
     }
   }
