@@ -2769,6 +2769,11 @@ function renderAircraft(viewer, aircraft) {
         // Check if this aircraft is currently selected (has glow enabled)
         const useGlow = selectedFlightId === a.id;
         const iconToUse = useGlow ? buildGlowSvgUri(shape, color) : icon;
+        // Log SVG URI and shape for any selected (glowing) aircraft
+        if (useGlow) {
+          console.log('[DEBUG] Glowing icon SVG URI:', iconToUse);
+          console.log('[DEBUG] Shape:', shape, 'Aircraft:', a);
+        }
         entity.billboard.image    = new Cesium.ConstantProperty(iconToUse);
         entity.billboard.width    = new Cesium.ConstantProperty(iconSizePx);
         entity.billboard.height   = new Cesium.ConstantProperty(iconSizePx);
