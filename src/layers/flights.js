@@ -1432,6 +1432,10 @@ function classificationColor(classification) {
   }
 }
 
+function aircraftColor(a) {
+  return classificationColor(classifyAircraft(a));
+}
+
 function getShape(a) {
   // Use backend-enriched icon if present
   if (a.icon && typeof a.icon === 'string' && a.icon !== 'unknown') {
