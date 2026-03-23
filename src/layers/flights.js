@@ -1432,6 +1432,10 @@ function classificationColor(classification) {
   }
 }
 
+function aircraftColor(a) {
+  return classificationColor(classifyAircraft(a));
+}
+
 // Normalize ICAO typecode for lookup (uppercase, trim, strip dashes/spaces, handle common suffixes)
 function normalizeTypecode(typecode) {
   if (!typecode) return '';
