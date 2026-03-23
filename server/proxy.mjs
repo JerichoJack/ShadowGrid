@@ -25,15 +25,30 @@ async function fetchAircraftInfoFromApis(icao, callsign) {
     const url = apiFn(icao);
     try {
       const resp = await fetch(url, { headers: HEADERS, signal: AbortSignal.timeout(8000) });
-      if (!resp.ok) continue;
-      const data = await resp.json();
+      if (!resp.ok) {
+        // Log non-OK responses with status and text
+        const text = await resp.text().catch(() => '[unreadable]');
+        console.warn(`[AircraftInfo] API ${url} returned status ${resp.status}: ${text.slice(0, 500)}`);
+        continue;
+      }
+      let data;
+      try {
+        data = await resp.json();
+      } catch (jsonErr) {
+        // Log the raw response if JSON parsing fails
+        const text = await resp.text().catch(() => '[unreadable]');
+        console.error(`[AircraftInfo] Failed to parse JSON from ${url}: ${jsonErr.message}\nResponse body: ${text.slice(0, 1000)}`);
+        continue;
+      }
       if (data && Object.keys(data).length > 0) {
         // If adsbdb returns {response: 'unknown aircraft'}, skip
         if (data.response && typeof data.response === 'string' && data.response.toLowerCase().includes('unknown')) continue;
         results.push({ source: url, data });
       }
     } catch (err) {
-      // Ignore errors, try next API
+      // Log fetch errors
+      console.error(`[AircraftInfo] Fetch error for ${url}: ${err.message}`);
+      continue;
     }
   }
   // Prefer the first successful result
