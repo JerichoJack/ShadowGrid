@@ -1503,25 +1503,68 @@ function getShape(a) {
     }
   }
   // Fallback
-  console.warn('[DEBUG] getShape: fallback to unknown for aircraft', a.id, a);
-  // Fire-and-forget fetch to log full aircraft API data
-  if (a.id) {
-    // Use a dynamic API base URL if available, fallback to relative path
+  // Throttle API fetches and send debug output to backend log file
+  if (!window._shadowgridAircraftDebugThrottle) {
+    window._shadowgridAircraftDebugThrottle = {
+      lastFetch: 0,
+      queue: [],
+      isProcessing: false
+    };
+  }
+  const throttle = window._shadowgridAircraftDebugThrottle;
+  const now = Date.now();
+  const THROTTLE_DELAY = 2000; // 2 seconds between API fetches
+  // Helper to process the queue
+  function processQueue() {
+    if (throttle.isProcessing || throttle.queue.length === 0) return;
+    const { id, a } = throttle.queue.shift();
+    throttle.isProcessing = true;
     const apiBase = (typeof window !== 'undefined' && window.SHADOWGRID_API_BASE_URL)
       ? window.SHADOWGRID_API_BASE_URL
       : '';
-    const serverUrl = apiBase + '/api/proxy/aircraft/' + encodeURIComponent(a.id);
-    try {
-      fetch(serverUrl)
-        .then(r => r.json())
-        .then(data => {
-          console.warn(`[DEBUG] ${serverUrl} response:`, data);
-        })
-        .catch(err => {
-          console.warn(`[DEBUG] ${serverUrl} fetch error:`, err);
+    const serverUrl = apiBase + '/api/proxy/aircraft/' + encodeURIComponent(id);
+    fetch(serverUrl)
+      .then(r => r.json())
+      .then(data => {
+        // Send debug info to backend log endpoint
+        const logUrl = apiBase + '/api/logs/aircraft-debug';
+        fetch(logUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            aircraftId: id,
+            aircraft: a,
+            apiResponse: data,
+            timestamp: new Date().toISOString()
+          })
         });
-    } catch (err) {
-      console.warn(`[DEBUG] ${serverUrl} fetch exception:`, err);
+      })
+      .catch(err => {
+        // Optionally send error to log endpoint
+        const logUrl = apiBase + '/api/logs/aircraft-debug';
+        fetch(logUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            aircraftId: id,
+            aircraft: a,
+            error: String(err),
+            timestamp: new Date().toISOString()
+          })
+        });
+      })
+      .finally(() => {
+        throttle.lastFetch = Date.now();
+        throttle.isProcessing = false;
+        setTimeout(processQueue, THROTTLE_DELAY);
+      });
+  }
+  // Enqueue this debug event
+  if (a.id) {
+    throttle.queue.push({ id: a.id, a });
+    // If enough time has passed, process immediately
+    if (!throttle.isProcessing && (now - throttle.lastFetch > THROTTLE_DELAY)) {
+      processQueue();
     }
   }
   return 'unknown';
