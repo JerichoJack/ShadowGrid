@@ -2342,7 +2342,7 @@ const aircraftCache = new Map();
 const routeCache    = new Map(); // callsign → { route, operator, ts }
 const ROUTE_TTL     = 5 * 60 * 1000; // 5 minutes
 
-async function fetchAircraftInfo(icao, callsign) {
+async function fetchAircraftInfo(icao) {
 
 
   const info = { registration: null, typecode: null, typeDesc: null, operator: null, route: null, country: null, year: null, manufacturer: null, model: null };
