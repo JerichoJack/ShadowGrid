@@ -4992,6 +4992,27 @@ async function handleFlights(query, res) {
 // ── HTTP server ───────────────────────────────────────────────────────────────
 
 const server = http.createServer(async (req, res) => {
+    // Aircraft Debug Log Endpoint
+    const logsDir = path.resolve(process.cwd(), 'logs');
+    const aircraftDebugLogPath = path.join(logsDir, 'aircraft-debug.log');
+    if (!fs.existsSync(logsDir)) fs.mkdirSync(logsDir, { recursive: true });
+    if (req.method === 'POST' && req.url === '/api/logs/aircraft-debug') {
+      let body = '';
+      req.on('data', chunk => { body += chunk; });
+      req.on('end', () => {
+        try {
+          const entry = JSON.parse(body);
+          entry.receivedAt = new Date().toISOString();
+          fs.appendFileSync(aircraftDebugLogPath, JSON.stringify(entry) + '\n');
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: true }));
+        } catch (err) {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: false, error: err.message }));
+        }
+      });
+      return;
+    }
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept');
