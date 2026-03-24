@@ -2883,11 +2883,9 @@ function renderAircraft(viewer, aircraft) {
     }
     const classification = classifyAircraft(a);  // Get classification for visibility
     // --- UAV Red Glow Logic ---
-    let icon;
+    let icon = buildSvgUri(shape, color);
     if (shape === 'uav') {
       icon = buildRedGlowSvgUri(shape, color);
-    } else {
-      icon = buildSvgUri(shape, color);
     }
     const iconSizePx = ICON_SIZE_PX[shape] ?? ICON_SIZE_PX.generic;
     const cesColor  = Cesium.Color.fromCssColorString(color);
