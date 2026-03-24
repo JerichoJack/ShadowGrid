@@ -2840,7 +2840,7 @@ function renderAircraft(viewer, aircraft) {
     const iconSizePx = ICON_SIZE_PX[shape] ?? ICON_SIZE_PX.generic;
     const cesColor  = Cesium.Color.fromCssColorString(color);
     if (a.icon) {
-      console.log('[DEBUG] Aircraft', a.id, 'icon property:', a.icon, '| shape resolved:', shape);
+      // console.log('[DEBUG] Aircraft', a.id, 'icon property:', a.icon, '| shape resolved:', shape);
     }
 
     if (entityMap.has(a.id)) {
