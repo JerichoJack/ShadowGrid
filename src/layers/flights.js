@@ -2854,8 +2854,8 @@ function renderAircraft(viewer, aircraft) {
         const iconToUse = useGlow ? buildGlowSvgUri(shape, color) : icon;
         // Log SVG URI and shape for any selected (glowing) aircraft
         if (useGlow) {
-          console.log('[DEBUG] Glowing icon SVG URI:', iconToUse);
-          console.log('[DEBUG] Shape:', shape, 'Aircraft:', a);
+          console.warn('[DEBUG] Glowing icon SVG URI:', iconToUse);
+          console.warn('[DEBUG] Shape:', shape, 'Aircraft:', a);
         }
         entity.billboard.image    = new Cesium.ConstantProperty(iconToUse);
         entity.billboard.width    = new Cesium.ConstantProperty(iconSizePx);
