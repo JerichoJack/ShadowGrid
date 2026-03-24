@@ -2388,7 +2388,6 @@ const aircraftCache = new Map();
 const routeCache    = new Map(); // callsign → { route, operator, ts }
 const ROUTE_TTL     = 5 * 60 * 1000; // 5 minutes
 
-async function fetchAircraftInfo(icao) {
 // Accepts optional AbortSignal for cancellation
 async function fetchAircraftInfo(icao, callsign = null, abortSignal = undefined) {
   const info = { registration: null, typecode: null, typeDesc: null, operator: null, route: null, country: null, year: null, manufacturer: null, model: null };
@@ -2823,7 +2822,6 @@ function zoneHtml({
       </div>
     </div>
   `;
-}
 }
 
 // Classification colors — must match flights.js
