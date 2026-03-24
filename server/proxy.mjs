@@ -5482,56 +5482,69 @@ const server = http.createServer(async (req, res) => {
         .filter(Boolean);
       const maxCam = Math.max(parseInt(query.camMax ?? `${CAMERA_MAX_POINTS}`, 10) || CAMERA_MAX_POINTS, 1);
       try {
-        const payload = { ts: Date.now(), mode: SERVER_HEAVY_MODE ? 'heavy' : 'normal' };
-        const flightsPromise = include.has('flights')
-          ? getFlightsPayload({
-            bounds: bounds ? bounds.join(',') : '',
-            mode: 'heavy',
-          })
-          : null;
-        const satellitesPromise = include.has('satellites')
-          ? getSatellitesSnapshotPayload(maxSat, { perCategory: satPerCategory, categories: satCategories })
-          : null;
-        const trafficPromise = (include.has('traffic') && bounds)
-          ? getTrafficPayload(bounds)
-          : null;
-        const marinePromise = (include.has('marine') && bounds)
-          ? getMarinePayload(bounds)
-          : null;
-        const camerasPromise = (include.has('cameras') && bounds)
-          ? getCameraSnapshot(bounds, maxCam)
-          : null;
-        const [flightsPayload, satellitesPayload, trafficPayload, marinePayload, camerasPayload] = await Promise.all([
-          flightsPromise,
-          satellitesPromise,
-          trafficPromise,
-          marinePromise,
-          camerasPromise,
-        ]);
-        if (flightsPayload) payload.flights = flightsPayload;
-        if (satellitesPayload) payload.satellites = satellitesPayload;
-        if (trafficPayload) payload.traffic = trafficPayload;
-        if (marinePayload) payload.marine = marinePayload;
-        if (camerasPayload) payload.cameras = camerasPayload;
-        payload.diagnostics = {
-          providers: {
-            flights: payload.flights?.source ?? null,
-            satellites: payload.satellites?.source ?? null,
-            traffic: payload.traffic?.source ?? null,
-            marine: payload.marine?.source ?? null,
-            cameras: payload.cameras?.source ?? null,
-          },
-          cache: {
-            flights: payload.flights?.cacheHit ?? null,
-            satellites: payload.satellites?.cacheHit ?? null,
-            traffic: payload.traffic?.cacheHit ?? null,
-            marine: payload.marine?.cacheHit ?? null,
-            cameras: payload.cameras?.cacheHit ?? null,
-          },
-        };
-        if (!res.headersSent) {
-          res.writeHead(200);
-          res.end(JSON.stringify(payload));
+        // Guard: if request is aborted, do not proceed
+        if (req.aborted) return;
+
+        // Optionally, listen for abort and set a flag
+        let aborted = false;
+        const onAborted = () => { aborted = true; };
+        req.on('aborted', onAborted);
+
+        try {
+          const payload = { ts: Date.now(), mode: SERVER_HEAVY_MODE ? 'heavy' : 'normal' };
+          const flightsPromise = include.has('flights')
+            ? getFlightsPayload({
+              bounds: bounds ? bounds.join(',') : '',
+              mode: 'heavy',
+            })
+            : null;
+          const satellitesPromise = include.has('satellites')
+            ? getSatellitesSnapshotPayload(maxSat, { perCategory: satPerCategory, categories: satCategories })
+            : null;
+          const trafficPromise = (include.has('traffic') && bounds)
+            ? getTrafficPayload(bounds)
+            : null;
+          const marinePromise = (include.has('marine') && bounds)
+            ? getMarinePayload(bounds)
+            : null;
+          const camerasPromise = (include.has('cameras') && bounds)
+            ? getCameraSnapshot(bounds, maxCam)
+            : null;
+          const [flightsPayload, satellitesPayload, trafficPayload, marinePayload, camerasPayload] = await Promise.all([
+            flightsPromise,
+            satellitesPromise,
+            trafficPromise,
+            marinePromise,
+            camerasPromise,
+          ]);
+          if (aborted || req.aborted) return;
+          if (flightsPayload) payload.flights = flightsPayload;
+          if (satellitesPayload) payload.satellites = satellitesPayload;
+          if (trafficPayload) payload.traffic = trafficPayload;
+          if (marinePayload) payload.marine = marinePayload;
+          if (camerasPayload) payload.cameras = camerasPayload;
+          payload.diagnostics = {
+            providers: {
+              flights: payload.flights?.source ?? null,
+              satellites: payload.satellites?.source ?? null,
+              traffic: payload.traffic?.source ?? null,
+              marine: payload.marine?.source ?? null,
+              cameras: payload.cameras?.source ?? null,
+            },
+            cache: {
+              flights: payload.flights?.cacheHit ?? null,
+              satellites: payload.satellites?.cacheHit ?? null,
+              traffic: payload.traffic?.cacheHit ?? null,
+              marine: payload.marine?.cacheHit ?? null,
+              cameras: payload.cameras?.cacheHit ?? null,
+            },
+          };
+          if (!res.headersSent && !aborted && !req.aborted) {
+            res.writeHead(200);
+            res.end(JSON.stringify(payload));
+          }
+        } finally {
+          req.off('aborted', onAborted);
         }
         return;
       } catch (err) {
