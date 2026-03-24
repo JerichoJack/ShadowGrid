@@ -189,6 +189,7 @@ async function fetchAircraftInfoFromApis(icao, callsign) {
     1100, // Airplanes.live: 1.1s (strict 1/sec)
   ];
   const results = [];
+  const errors = [];
   for (let i = 0; i < AIRCRAFT_INFO_APIS.length; i++) {
     const apiFn = AIRCRAFT_INFO_APIS[i];
     const mapFn = mappingFns[i];
@@ -197,8 +198,8 @@ async function fetchAircraftInfoFromApis(icao, callsign) {
       const resp = await fetch(url, { headers: HEADERS, signal: AbortSignal.timeout(8000) });
       if (!resp.ok) {
         const text = await resp.text().catch(() => '[unreadable]');
+        errors.push({ provider: url, status: resp.status, error: 'Non-OK response', body: text.slice(0, 500) });
         console.warn(`[AircraftInfo] API ${url} returned status ${resp.status}: ${text.slice(0, 500)}`);
-        // Always delay between providers, even on error
         await sleep(providerDelays[i]);
         continue;
       }
@@ -207,30 +208,31 @@ async function fetchAircraftInfoFromApis(icao, callsign) {
         data = await resp.json();
       } catch (jsonErr) {
         const text = await resp.text().catch(() => '[unreadable]');
+        errors.push({ provider: url, status: resp.status, error: 'Invalid JSON', message: jsonErr.message, body: text.slice(0, 500) });
         console.error(`[AircraftInfo] Failed to parse JSON from ${url}: ${jsonErr.message}\nResponse body: ${text.slice(0, 1000)}`);
         await sleep(providerDelays[i]);
         continue;
       }
       // adsbdb unknown aircraft skip
       if (i === 0 && data.response && typeof data.response === 'string' && data.response.toLowerCase().includes('unknown')) {
+        errors.push({ provider: url, status: resp.status, error: 'Unknown aircraft', body: data.response });
         await sleep(providerDelays[i]);
         continue;
       }
       const normalized = mapFn(data);
-      // Only push if we have at least an icao24 or registration
       if (normalized && (normalized.icao24 || normalized.registration)) {
         results.push({ source: url, data: normalized });
+      } else {
+        errors.push({ provider: url, status: resp.status, error: 'No valid aircraft data', body: JSON.stringify(data).slice(0, 500) });
       }
     } catch (err) {
+      errors.push({ provider: url, error: 'Fetch error', message: err.message });
       console.error(`[AircraftInfo] Fetch error for ${url}: ${err.message}`);
-      // Always delay between providers, even on error
       await sleep(providerDelays[i]);
       continue;
     }
-    // Delay between each provider to respect rate limits
     await sleep(providerDelays[i]);
   }
-  // Prefer the first successful normalized result
   let enriched = null;
   let sources = [];
   if (results.length > 0) {
@@ -245,7 +247,7 @@ async function fetchAircraftInfoFromApis(icao, callsign) {
     if (!('classification' in enriched)) enriched.classification = classifyAircraftServer(enriched);
     return { ok: true, icao, callsign, result: enriched, sources };
   }
-  return { ok: false, icao, callsign, error: 'No data found from external APIs' };
+  return { ok: false, icao, callsign, error: 'No data found from external APIs', providerErrors: errors };
 }
 
 const AIRCRAFT_CSV_PATHS = [

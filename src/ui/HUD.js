@@ -2346,14 +2346,16 @@ async function fetchAircraftInfo(icao) {
 
 
   const info = { registration: null, typecode: null, typeDesc: null, operator: null, route: null, country: null, year: null, manufacturer: null, model: null };
+  let providerErrors = null;
 
   // Only use static aircraft info (cached permanently per ICAO24)
   if (aircraftCache.has(icao)) {
     Object.assign(info, aircraftCache.get(icao));
+    providerErrors = aircraftCache.get(icao)?.providerErrors || null;
   } else {
     let proxyFailed = false;
+    let dbOnly = false;
     try {
-      // Use correct RESTful pattern: /api/proxy/aircraft/:icao (callsign not sent)
       let url = `${BACKEND_BASE_URL}/api/proxy/aircraft/${encodeURIComponent(icao.toLowerCase())}`;
       const r = await fetch(url, { signal: AbortSignal.timeout(7000) });
       console.log('[fetchAircraftInfo] Proxy request:', url, 'Status:', r.status);
@@ -2361,9 +2363,7 @@ async function fetchAircraftInfo(icao) {
         const d = await r.json();
         console.log('[fetchAircraftInfo] Proxy response:', d);
         if (d && d.ok && d.result) {
-          // Support nested adsbdb.com/hexdb/adsb.lol response structures
           let a = d.result;
-          // If adsbdb.com, info is under result.response.aircraft
           if (a.response && a.response.aircraft) {
             a = a.response.aircraft;
           }
@@ -2375,14 +2375,18 @@ async function fetchAircraftInfo(icao) {
           info.year         = a.year ?? a.year_built ?? null;
           info.manufacturer = a.manufacturer ?? null;
           info.model        = a.model ?? null;
-          info.route        = a.route ?? null; // If present in the aircraft endpoint
+          info.route        = a.route ?? null;
         } else {
           proxyFailed = true;
+          providerErrors = d?.providerErrors || null;
         }
       } else {
         proxyFailed = true;
+        try {
+          const d = await r.json();
+          providerErrors = d?.providerErrors || null;
+        } catch {}
         if (r.status === 404) {
-          // Log for debugging
           console.warn(`[fetchAircraftInfo] Proxy 404 for ICAO: ${icao}`);
         } else {
           console.warn(`[fetchAircraftInfo] Proxy error for ICAO: ${icao}, status: ${r.status}`);
@@ -2392,18 +2396,13 @@ async function fetchAircraftInfo(icao) {
       proxyFailed = true;
       console.warn(`[fetchAircraftInfo] Proxy fetch failed for ICAO: ${icao}`, err);
     }
-
-    // Fallback: If proxy failed, try to fill from local DB (if available) and mark as DB-only
-    let dbOnly = false;
     if (proxyFailed) {
-      // Try to get from cache (which is filled from DB on flight load)
       if (aircraftCache.has(icao)) {
         Object.assign(info, aircraftCache.get(icao));
         dbOnly = true;
       }
-      // Optionally, could fetch from a local endpoint if needed
     }
-    aircraftCache.set(icao, { ...info, dbOnly });
+    aircraftCache.set(icao, { ...info, dbOnly, providerErrors });
   }
 
   // Ensure all fields are safe defaults (never undefined)
@@ -2417,6 +2416,8 @@ async function fetchAircraftInfo(icao) {
     year: info.year ?? null,
     manufacturer: info.manufacturer ?? null,
     model: info.model ?? null,
+    providerErrors,
+    dbOnly: info.dbOnly || false,
   };
 }
 
@@ -2425,7 +2426,7 @@ async function fetchAircraftInfo(icao) {
 function renderPanel(panel, data, viewer, entity) {
   const {
     icao, callsign, altFt, kts, heading, squawk, vert, provider, dbFlags, classification,
-    registration, typecode, typeDesc, operator, route, country, year, loading, dbOnly
+    registration, typecode, typeDesc, operator, route, country, year, loading, dbOnly, providerErrors
   } = data;
 
   const altFtStr   = Number.isFinite(altFt) ? `${Math.round(altFt).toLocaleString()} ft`  : '—';
@@ -2448,6 +2449,10 @@ function renderPanel(panel, data, viewer, entity) {
   const adsbLolLink = `https://adsb.lol/?icao=${icao.toLowerCase()}`;
   const fr24Link    = registration ? `https://www.flightradar24.com/${registration}` : null;
 
+  let errorHtml = '';
+  if (providerErrors && Array.isArray(providerErrors) && providerErrors.length > 0) {
+    errorHtml = `<div style="color:#ff4444;font-size:11px;margin-bottom:8px">No live aircraft info found.<br>Provider errors:<ul style='margin:4px 0 0 12px;padding:0 0 0 0;font-size:10px;color:#ffb3b3'>${providerErrors.map(e => `<li>${e.provider ? `<b>${e.provider}</b>: ` : ''}${e.error || ''}${e.status ? ` (status ${e.status})` : ''}${e.message ? `: ${e.message}` : ''}</li>`).join('')}</ul></div>`;
+  }
   panel.innerHTML = `
     <div style="background:rgba(0,0,0,0.3);padding:12px 16px;border-bottom:1px solid ${acColor}44;border-left:3px solid ${acColor}">
       <div style="display:flex;align-items:center;gap:10px">
@@ -2468,6 +2473,7 @@ function renderPanel(panel, data, viewer, entity) {
     <div style="padding:10px 16px">
       ${loading ? `<div style="opacity:0.45;font-size:10px;margin-bottom:8px">Fetching aircraft data...</div>` : ''}
       ${dbOnly ? `<div style="color:#ffb300;font-size:11px;margin-bottom:8px">Online Info Update Failed: Info provided by Server Database</div>` : ''}
+      ${errorHtml}
 
       <table style="width:100%;border-collapse:collapse;font-size:11px">
         ${row('Type',     typeDisplay)}
