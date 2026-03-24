@@ -1745,35 +1745,11 @@ function classifyAircraftServer(a) {
 }
 
 function enrichAircraftFromDb(a) {
-        // --- UAV fallback: if all fields are empty, but ICAO24 is in known UAV/military range, force UAV icon ---
-        const icao24hex = (a.icao24 || a.icao || a.hex || '').toLowerCase();
-        // US military ICAO range: AE0000–AFFFFF (hex)
-        const isLikelyUSMil = /^ae[0-9a-f]{4}$/i.test(icao24hex);
-        // Known UAV callsign patterns (add more as needed)
-        const csUav = (a.callsign || '').toUpperCase();
-        const regUav = (a.registration || '').toUpperCase();
-        const isLikelyUAV =
-          isLikelyUSMil ||
-          csUav.startsWith('SCORE', 'SAVAGE', 'WRAITH', 'MAGMA', 'ARCHON', 'DEMON', 'GHOST', 'SNOOPY', 'WARLOCK', 'DRAGONLADY', 'TALON') ||
-          csUav.startsWith('UAV') ||
-          regUav.startsWith('UAV') ||
-          false;
-        if (
-          (!a.typecode || a.typecode === '') &&
-          (!a.category || a.category === '') &&
-          (!a.model || a.model === '') &&
-          (!a.modelFullName || a.modelFullName === '') &&
-          (!a.categoryDescription || a.categoryDescription === '') &&
-          isLikelyUAV
-        ) {
-          a.typecode = 'Q9';
-          a.category = 'B6';
-          a.icon = 'uav';
-          a.iconScale = 1;
-        }
+    // --- DB/type enrichment first ---
+    const icao24hex = (a.icao24 || a.icao || a.hex || '').toLowerCase();
     // --- Fallback enrichment for missing info fields ---
     // Try to fill missing operator, country, manufacturer, model from aircraftDb or typeDb
-    const icao24 = (a.icao24 || a.icao || a.hex || '').toLowerCase();
+    const icao24 = icao24hex;
     if (!icao24) return;
     let db = aircraftDb[icao24];
     let typecode = (a.typecode || '').toUpperCase();
@@ -1786,6 +1762,41 @@ function enrichAircraftFromDb(a) {
       if (!a.typecode && db.typecode) a.typecode = db.typecode.toUpperCase();
       if (!a.category && db.category) a.category = db.category;
     }
+      // --- UAV fallback: only if still ambiguous after all enrichment, and strong UAV evidence ---
+      // US military ICAO range: AE0000–AFFFFF (hex)
+      // const isLikelyUSMil = /^ae[0-9a-f]{4}$/i.test(icao24hex);
+      // Only apply if all key fields are empty
+      const fieldsEmpty =
+        (!a.typecode || a.typecode === '') &&
+        (!a.category || a.category === '') &&
+        (!a.model || a.model === '') &&
+        (!a.modelFullName || a.modelFullName === '') &&
+        (!a.categoryDescription || a.categoryDescription === '');
+      // Strong UAV evidence: US mil hex AND model/modelFullName/typeDescription contains UAV keywords
+      let uavEvidence = false;
+      const modelStr = (a.model || '').toUpperCase();
+      const modelFullStr = (a.modelFullName || '').toUpperCase();
+      const typeDescStr = (a.typeDescription || '').toUpperCase();
+      if (
+        // isLikelyUSMil &&
+        (
+          modelStr.includes('MQ-9') || modelStr.includes('REAPER') ||
+          modelStr.includes('MQ-1') || modelStr.includes('PREDATOR') ||
+          modelStr.includes('RQ-4') || modelStr.includes('GLOBAL HAWK') ||
+          modelFullStr.includes('MQ-9') || modelFullStr.includes('REAPER') ||
+          modelFullStr.includes('MQ-1') || modelFullStr.includes('PREDATOR') ||
+          modelFullStr.includes('RQ-4') || modelFullStr.includes('GLOBAL HAWK') ||
+          typeDescStr.includes('UAV') || typeDescStr.includes('UNMANNED')
+        )
+      ) {
+        uavEvidence = true;
+      }
+      if (fieldsEmpty && uavEvidence) {
+        a.typecode = 'Q9';
+        a.category = 'B6';
+        a.icon = 'uav';
+        a.iconScale = 1;
+      }
     // Aggressively fill typecode from all possible sources
     a.typecode = (
       a.typecode || a.Typecode || a.t || a.type || a.aircraftType || ''
