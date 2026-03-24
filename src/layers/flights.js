@@ -2848,7 +2848,7 @@ function renderAircraft(viewer, aircraft) {
     if (a.icon) {
       // console.log('[DEBUG] Aircraft', a.id, 'icon property:', a.icon, '| shape resolved:', shape);
     }
-// UAV Red Glow SVG builder
+// UAV Red Glow SVG builder (moved to top-level scope)
 const redGlowSvgCache = new Map();
 function buildRedGlowSvgUri(shape, color) {
   const key = `${shape}:${color}:redglow`;
@@ -2862,7 +2862,7 @@ function buildRedGlowSvgUri(shape, color) {
   const w = iconSize, h = iconSize;
 
   // Determine viewBox centre for pulsing ring positioning
-  const vbParts = vb.split(/[,\s]+/).map(Number);
+  const vbParts = vb.split(/[\s,]+/).map(Number);
   const cx = (vbParts[0] ?? 0) + (vbParts[2] ?? 32) / 2;
   const cy = (vbParts[1] ?? 0) + (vbParts[3] ?? 32) / 2;
   const r1 = Math.min(vbParts[2] ?? 32, vbParts[3] ?? 32) * 0.4;
