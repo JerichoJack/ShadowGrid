@@ -1786,6 +1786,36 @@ function enrichAircraftFromDb(a) {
     const mcode = (a.manufacturerCode || '').toUpperCase();
     if (mcode && manufacturerDb[mcode] && !a.manufacturer) a.manufacturer = manufacturerDb[mcode];
 
+    // --- Fallback: fill typecode/category from categoryDescription/model if missing ---
+    if ((!a.typecode || a.typecode === '') && typeof a.categoryDescription === 'string' && a.categoryDescription.length > 0) {
+      // If categoryDescription is a known UAV category, set as category
+      const catDesc = a.categoryDescription.trim().toUpperCase();
+      if (catDesc === 'B6' || catDesc === 'UAV' || catDesc === 'UNMANNED AERIAL VEHICLE') {
+        a.category = 'B6';
+      }
+    }
+    // If still missing typecode, try to infer from model/modelFullName
+    if ((!a.typecode || a.typecode === '') && typeof a.model === 'string') {
+      const m = a.model.toUpperCase();
+      if (m.includes('MQ-9') || m.includes('REAPER')) {
+        a.typecode = 'Q9';
+      } else if (m.includes('MQ-1') || m.includes('PREDATOR')) {
+        a.typecode = 'Q1';
+      } else if (m.includes('RQ-4') || m.includes('GLOBAL HAWK')) {
+        a.typecode = 'Q4';
+      }
+    }
+    if ((!a.typecode || a.typecode === '') && typeof a.modelFullName === 'string') {
+      const m = a.modelFullName.toUpperCase();
+      if (m.includes('MQ-9') || m.includes('REAPER')) {
+        a.typecode = 'Q9';
+      } else if (m.includes('MQ-1') || m.includes('PREDATOR')) {
+        a.typecode = 'Q1';
+      } else if (m.includes('RQ-4') || m.includes('GLOBAL HAWK')) {
+        a.typecode = 'Q4';
+      }
+    }
+
   // --- Icon/Scale enrichment (tar1090 hierarchy) ---
   // Normalize category and check CategoryIcons first
   let cat = a.category;
