@@ -1754,7 +1754,7 @@ function enrichAircraftFromDb(a) {
         const regUav = (a.registration || '').toUpperCase();
         const isLikelyUAV =
           isLikelyUSMil ||
-          csUav.startsWith('SCORE') ||
+          csUav.startsWith('SCORE', 'SAVAGE', 'WRAITH', 'MAGMA', 'ARCHON', 'DEMON', 'GHOST', 'SNOOPY', 'WARLOCK', 'DRAGONLADY', 'TALON') ||
           csUav.startsWith('UAV') ||
           regUav.startsWith('UAV') ||
           false;
