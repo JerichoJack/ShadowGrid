@@ -9,74 +9,238 @@ import { feature as topojsonFeature } from 'topojson-client';
 import { upsertAircraftRecord } from './collectors/upsertAircraftRecord.js';
 import { parse as csvParse } from 'csv-parse/sync';
 
+// --- Aircraft API Mapping Functions ---
+// Unified schema fields:
+// icao24,registration,manufacturericao,manufacturername,model,typecode,serialnumber,linenumber,icaoaircrafttype,operator,operatorcallsign,operatoricao,operatoriata,owner,testreg,registered,reguntil,status,built,firstflightdate,seatconfiguration,engines,modes,adsb,acars,notes,categoryDescription,firstseen,lastseen
+
+function mapAdsbdbToUnified(raw) {
+  const ac = raw?.response?.aircraft || {};
+  return {
+    icao24: ac.mode_s?.toLowerCase() || null,
+    registration: ac.registration || null,
+    manufacturericao: null, // Not provided
+    manufacturername: ac.manufacturer || null,
+    model: ac.type || null,
+    typecode: ac.icao_type || null,
+    serialnumber: null,
+    linenumber: null,
+    icaoaircrafttype: ac.icao_type || null,
+    operator: ac.registered_owner || null,
+    operatorcallsign: null,
+    operatoricao: ac.registered_owner_operator_flag_code || null,
+    operatoriata: null,
+    owner: ac.registered_owner || null,
+    testreg: null,
+    registered: ac.registered_owner_country_name || null, // Country, not date
+    reguntil: null,
+    status: 'active',
+    built: null,
+    firstflightdate: null,
+    seatconfiguration: null,
+    engines: null,
+    modes: null,
+    adsb: null,
+    acars: false,
+    notes: ac.url_photo || null,
+    categoryDescription: null,
+    firstseen: null,
+    lastseen: null,
+  };
+}
+
+function mapHexdbToUnified(raw) {
+  return {
+    icao24: raw.ModeS?.toLowerCase() || null,
+    registration: raw.Registration || null,
+    manufacturericao: null,
+    manufacturername: raw.Manufacturer || null,
+    model: raw.Type || null,
+    typecode: raw.ICAOTypeCode || null,
+    serialnumber: null,
+    linenumber: null,
+    icaoaircrafttype: raw.ICAOTypeCode || null,
+    operator: raw.RegisteredOwners || null,
+    operatorcallsign: null,
+    operatoricao: raw.OperatorFlagCode || null,
+    operatoriata: null,
+    owner: raw.RegisteredOwners || null,
+    testreg: null,
+    registered: null,
+    reguntil: null,
+    status: 'active',
+    built: null,
+    firstflightdate: null,
+    seatconfiguration: null,
+    engines: null,
+    modes: null,
+    adsb: null,
+    acars: false,
+    notes: null,
+    categoryDescription: null,
+    firstseen: null,
+    lastseen: null,
+  };
+}
+
+function mapAdsbLolToUnified(raw) {
+  // raw.ac is an array
+  const ac = Array.isArray(raw.ac) && raw.ac.length > 0 ? raw.ac[0] : {};
+  return {
+    icao24: ac.hex?.toLowerCase() || null,
+    registration: ac.r || null,
+    manufacturericao: null,
+    manufacturername: null,
+    model: null,
+    typecode: ac.t || null,
+    serialnumber: null,
+    linenumber: null,
+    icaoaircrafttype: ac.t || null,
+    operator: null,
+    operatorcallsign: ac.flight ? ac.flight.trim() : null,
+    operatoricao: null,
+    operatoriata: null,
+    owner: null,
+    testreg: null,
+    registered: null,
+    reguntil: null,
+    status: 'active',
+    built: null,
+    firstflightdate: null,
+    seatconfiguration: null,
+    engines: null,
+    modes: ac.messages || null,
+    adsb: ac.type || null,
+    acars: false,
+    notes: null,
+    categoryDescription: ac.category || null,
+    firstseen: null,
+    lastseen: typeof ac.seen === 'number' ? Date.now() - ac.seen * 1000 : null,
+  };
+}
+
+function mapAirplanesLiveToUnified(raw) {
+  // raw.ac is an array
+  const ac = Array.isArray(raw.ac) && raw.ac.length > 0 ? raw.ac[0] : {};
+  return {
+    icao24: ac.hex?.toLowerCase() || null,
+    registration: ac.r || null,
+    manufacturericao: null,
+    manufacturername: null,
+    model: ac.desc || null,
+    typecode: ac.t || null,
+    serialnumber: null,
+    linenumber: null,
+    icaoaircrafttype: ac.t || null,
+    operator: ac.ownOp || null,
+    operatorcallsign: ac.flight ? ac.flight.trim() : null,
+    operatoricao: null,
+    operatoriata: null,
+    owner: ac.ownOp || null,
+    testreg: null,
+    registered: null,
+    reguntil: null,
+    status: 'active',
+    built: ac.year || null,
+    firstflightdate: null,
+    seatconfiguration: null,
+    engines: null,
+    modes: ac.messages || null,
+    adsb: ac.type || null,
+    acars: false,
+    notes: null,
+    categoryDescription: ac.category || null,
+    firstseen: null,
+    lastseen: typeof ac.seen === 'number' ? Date.now() - ac.seen * 1000 : null,
+  };
+}
+
 // --- Aircraft Info Proxy Endpoint ---
 // Proxies requests to external aircraft info APIs to avoid CORS issues on the frontend.
 // Usage: GET /api/proxy/aircraft/:icao?callsign=XXX
 const AIRCRAFT_INFO_APIS = [
   (icao) => `https://api.adsbdb.com/v0/aircraft/${icao}`,
-  (icao) => `https://api.hexdb.io/api/v1/aircraft/${icao}`,
-  (icao) => `https://api.adsb.lol/v2/aircraft/${icao}`,
+  (icao) => `https://hexdb.io/api/v1/aircraft/${icao}`,
+  (icao) => `https://api.adsb.lol/v2/icao/${icao}`,
+  (icao) => `https://api.airplanes.live/v2/icao/${icao}`,
 ];
 
 async function fetchAircraftInfoFromApis(icao, callsign) {
   icao = String(icao).toLowerCase();
+  /**
+   * Per-provider API rate limits and documentation:
+   * - Airplanes.live: 1 request/sec (free tier may be throttled to 10s). Docs: https://airplanes.live/api-guide/#:~:text=Data%20Field%20Descriptions,Terms ; Reddit: https://www.reddit.com/r/ATAK/comments/1r6m0zz/adsb_direct_issues/#:~:text=%E2%80%A2%201mo%20ago-,Airplanes.,rate%20to%2010%20second%20intervals.&text=Its%20going%20to%20time%20out,to%20get%20a%20paid%20API.&text=Which%20version%20of%20ATAK%20and,44.010000/%2D88.580000/120/%20.
+   * - ADSB.lol: Dynamic, avoid 4xx errors, no fixed cap. GitHub: https://github.com/adsblol/api#:~:text=Rate%20limits,to%20contribute%20to%20the%20project.
+   * - ADSBdb.com: Not explicit, but 1 req/sec is common for open data. GitHub: https://github.com/adsbfi/opendata/blob/main/README.md#:~:text=Limits,1%20request%20every%2030%20seconds.
+   * - Hexdb.io: Not explicit, but 60-100 req/min typical. Apiary: https://hexpm.docs.apiary.io/#:~:text=The%20rate%20limiting%20allows%20you,window%20reset%20in%20UNIX%20epoch.
+   *
+   * If stricter limits are published, update these values accordingly.
+   */
+  const mappingFns = [
+    mapAdsbdbToUnified,
+    mapHexdbToUnified,
+    mapAdsbLolToUnified,
+    mapAirplanesLiveToUnified,
+  ];
+  // Per-provider minimum delay in ms (conservative defaults)
+  const providerDelays = [
+    1100, // ADSBdb.com: 1.1s (slightly above 1/sec)
+    700,  // Hexdb.io: ~0.7s (about 85/min)
+    1200, // ADSB.lol: 1.2s (dynamic, avoid bursts)
+    1100, // Airplanes.live: 1.1s (strict 1/sec)
+  ];
   const results = [];
-  for (const apiFn of AIRCRAFT_INFO_APIS) {
+  for (let i = 0; i < AIRCRAFT_INFO_APIS.length; i++) {
+    const apiFn = AIRCRAFT_INFO_APIS[i];
+    const mapFn = mappingFns[i];
     const url = apiFn(icao);
     try {
       const resp = await fetch(url, { headers: HEADERS, signal: AbortSignal.timeout(8000) });
       if (!resp.ok) {
-        // Log non-OK responses with status and text
         const text = await resp.text().catch(() => '[unreadable]');
         console.warn(`[AircraftInfo] API ${url} returned status ${resp.status}: ${text.slice(0, 500)}`);
+        // Always delay between providers, even on error
+        await sleep(providerDelays[i]);
         continue;
       }
       let data;
       try {
         data = await resp.json();
       } catch (jsonErr) {
-        // Log the raw response if JSON parsing fails
         const text = await resp.text().catch(() => '[unreadable]');
         console.error(`[AircraftInfo] Failed to parse JSON from ${url}: ${jsonErr.message}\nResponse body: ${text.slice(0, 1000)}`);
+        await sleep(providerDelays[i]);
         continue;
       }
-      if (data && Object.keys(data).length > 0) {
-        // If adsbdb returns {response: 'unknown aircraft'}, skip
-        if (data.response && typeof data.response === 'string' && data.response.toLowerCase().includes('unknown')) continue;
-        results.push({ source: url, data });
+      // adsbdb unknown aircraft skip
+      if (i === 0 && data.response && typeof data.response === 'string' && data.response.toLowerCase().includes('unknown')) {
+        await sleep(providerDelays[i]);
+        continue;
+      }
+      const normalized = mapFn(data);
+      // Only push if we have at least an icao24 or registration
+      if (normalized && (normalized.icao24 || normalized.registration)) {
+        results.push({ source: url, data: normalized });
       }
     } catch (err) {
-      // Log fetch errors
       console.error(`[AircraftInfo] Fetch error for ${url}: ${err.message}`);
+      // Always delay between providers, even on error
+      await sleep(providerDelays[i]);
       continue;
     }
+    // Delay between each provider to respect rate limits
+    await sleep(providerDelays[i]);
   }
-  // Prefer the first successful result
+  // Prefer the first successful normalized result
   let enriched = null;
   let sources = [];
   if (results.length > 0) {
     enriched = { ...results[0].data };
     sources = results.map(r => r.source);
-  } else {
-    // Fallback: try airplanes.live
-    try {
-      const url = `https://api.airplanes.live/v2/icao/${icao}`;
-      const resp = await fetch(url, { headers: HEADERS, signal: AbortSignal.timeout(8000) });
-      if (resp.ok) {
-        const d = await resp.json();
-        if (d && d.ac && d.ac.length > 0) {
-          enriched = d.ac[0];
-          sources = [url];
-        }
-      }
-    } catch (err) {
-      // Ignore
-    }
   }
   if (enriched) {
-    if (callsign && !enriched.callsign) enriched.callsign = callsign;
+    if (callsign && !enriched.operatorcallsign) enriched.operatorcallsign = callsign;
     enrichAircraftFromDb(enriched);
-    if (!('category' in enriched)) enriched.category = '';
+    if (!('categoryDescription' in enriched)) enriched.categoryDescription = '';
     if (!('icon' in enriched)) enriched.icon = 'unknown';
     if (!('classification' in enriched)) enriched.classification = classifyAircraftServer(enriched);
     return { ok: true, icao, callsign, result: enriched, sources };
@@ -1543,7 +1707,6 @@ function loadAircraftDatabaseSync() {
   }
   console.log('[AircraftDB] Loaded', Object.keys(aircraftDb).length, 'aircraft,', Object.keys(typeDb).length, 'types,', Object.keys(manufacturerDb).length, 'manufacturers');
 }
-
 
 // --- Server-side aircraft classification (mirrors client logic) ---
 function classifyAircraftServer(a) {

@@ -25,26 +25,33 @@ export function upsertAircraftRecord(info) {
     'status','built','firstflightdate','seatconfiguration','engines','modes',
     'adsb','acars','notes','categoryDescription','firstseen','lastseen'
   ];
+
+  // --- Normalization: only allow known fields, fill missing with '' ---
+  const normalized = {};
+  for (const h of headers) {
+    normalized[h] = (info[h] !== undefined && info[h] !== null) ? info[h] : '';
+  }
+  // Remove any extraneous fields
+  // (not strictly necessary, but ensures only unified schema is stored)
+
   if (fs.existsSync(DB_PATH)) {
     const csv = fs.readFileSync(DB_PATH, 'utf8');
     rows = csvParse(csv, { columns: true, skip_empty_lines: true });
   }
   // Find existing row for this icao24
-  const idx = rows.findIndex(r => (r.icao24 || r.ICAO24 || '').toLowerCase() === info.icao24.toLowerCase());
+  const idx = rows.findIndex(r => (r.icao24 || r.ICAO24 || '').toLowerCase() === normalized.icao24.toLowerCase());
   if (idx !== -1) {
     // Update only provided fields, preserve others
     const updated = { ...rows[idx] };
-    for (const k of Object.keys(info)) {
-      if (headers.includes(k)) updated[k] = info[k] || '';
+    for (const h of headers) {
+      if (Object.prototype.hasOwnProperty.call(info, h) && info[h] !== undefined && info[h] !== null) {
+        updated[h] = info[h];
+      }
     }
     rows[idx] = updated;
   } else {
-    // New row: fill all fields with info or 'unknown'
-    const newRow = {};
-    for (const h of headers) {
-      newRow[h] = (info[h] !== undefined && info[h] !== null && info[h] !== '') ? info[h] : 'unknown';
-    }
-    rows.push(newRow);
+    // New row: fill all fields with normalized info
+    rows.push({ ...normalized });
   }
   // Write back to CSV
   const csvOut = csvStringify(rows, { header: true, columns: headers });

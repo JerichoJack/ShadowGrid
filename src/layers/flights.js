@@ -1513,7 +1513,7 @@ function getShape(a) {
   }
   const throttle = window._shadowgridAircraftDebugThrottle;
   const now = Date.now();
-  const THROTTLE_DELAY = 2000; // 2 seconds between API fetches
+  const THROTTLE_DELAY = 5000; // 5 seconds between API fetches
   // Helper to process the queue
   function processQueue() {
     if (throttle.isProcessing || throttle.queue.length === 0) return;
