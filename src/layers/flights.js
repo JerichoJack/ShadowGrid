@@ -2836,12 +2836,63 @@ function renderAircraft(viewer, aircraft) {
       });
     }
     const classification = classifyAircraft(a);  // Get classification for visibility
-    const icon      = buildSvgUri(shape, color);
+    // --- UAV Red Glow Logic ---
+    let icon;
+    if (shape === 'uav') {
+      icon = buildRedGlowSvgUri(shape, color);
+    } else {
+      icon = buildSvgUri(shape, color);
+    }
     const iconSizePx = ICON_SIZE_PX[shape] ?? ICON_SIZE_PX.generic;
     const cesColor  = Cesium.Color.fromCssColorString(color);
     if (a.icon) {
       // console.log('[DEBUG] Aircraft', a.id, 'icon property:', a.icon, '| shape resolved:', shape);
     }
+// UAV Red Glow SVG builder
+const redGlowSvgCache = new Map();
+function buildRedGlowSvgUri(shape, color) {
+  const key = `${shape}:${color}:redglow`;
+  if (redGlowSvgCache.has(key)) return redGlowSvgCache.get(key);
+
+  const glowCol  = '#ff0000'; // Red glow
+  const shapeDef = SHAPES[shape] ?? SHAPES.unknown;
+  const vb       = shapeDef.viewBox ?? '0 0 32 32';
+  // Use ICON_SIZE_PX for per-shape icon size, fallback to 32 if not found
+  const iconSize = ICON_SIZE_PX[shape] || 32;
+  const w = iconSize, h = iconSize;
+
+  // Determine viewBox centre for pulsing ring positioning
+  const vbParts = vb.split(/[,\s]+/).map(Number);
+  const cx = (vbParts[0] ?? 0) + (vbParts[2] ?? 32) / 2;
+  const cy = (vbParts[1] ?? 0) + (vbParts[3] ?? 32) / 2;
+  const r1 = Math.min(vbParts[2] ?? 32, vbParts[3] ?? 32) * 0.4;
+  const r2 = r1 * 0.88;
+
+  const xform    = shapeDef.transform ? ` transform="${shapeDef.transform}"` : '';
+  const fillInner = shapeToInnerSvg(shapeDef, color, glowCol);
+
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${vb}" width="${w}" height="${h}">
+  <defs>
+    <filter id="red-glow-filter" x="-100%" y="-100%" width="300%" height="300%">
+      <feGaussianBlur stdDeviation="3" result="coloredBlur"/>
+      <feMerge><feMergeNode in="coloredBlur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <circle cx="${cx}" cy="${cy}" r="${r1}" fill="none" stroke="${glowCol}" stroke-width="2" opacity="0.7">
+    <animate attributeName="r" values="${r1};${r1*1.38};${r1}" dur="1.5s" repeatCount="indefinite"/>
+    <animate attributeName="opacity" values="0.8;0.2;0.8" dur="1.5s" repeatCount="indefinite"/>
+  </circle>
+  <circle cx="${cx}" cy="${cy}" r="${r2}" fill="none" stroke="${glowCol}" stroke-width="1.5" opacity="0.5">
+    <animate attributeName="r" values="${r2};${r2*1.43};${r2}" dur="2s" repeatCount="indefinite"/>
+    <animate attributeName="opacity" values="0.6;0.15;0.6" dur="2s" repeatCount="indefinite"/>
+  </circle>
+  <g${xform} stroke-linejoin="round" filter="url(#red-glow-filter)">${fillInner}</g>
+</svg>`;
+
+  const uri = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
+  redGlowSvgCache.set(key, uri);
+  return uri;
+}
 
     if (entityMap.has(a.id)) {
       const entity = entityMap.get(a.id);
