@@ -1,3 +1,29 @@
+// ── Server Down Warning Logic ─────────────────────────────
+function showServerDownWarning() {
+  const el = document.getElementById('server-down-warning');
+  if (el) el.style.display = 'block';
+}
+function hideServerDownWarning() {
+  const el = document.getElementById('server-down-warning');
+  if (el) el.style.display = 'none';
+}
+
+// Poll a lightweight endpoint every 10s to check server health
+async function pollServerHealth() {
+  while (true) {
+    try {
+      const res = await fetch('/api/world/snapshot', { method: 'HEAD', cache: 'no-store' });
+      if (res.ok) {
+        hideServerDownWarning();
+      } else {
+        showServerDownWarning();
+      }
+    } catch {
+      showServerDownWarning();
+    }
+    await new Promise(r => setTimeout(r, 10000));
+  }
+}
 /**
  * File: src/main.js
  * Purpose: Application bootstrap sequence for globe, layers, controls, and HUD.
@@ -126,4 +152,8 @@ boot().catch(err => {
   console.error('[ShadowGrid] Boot failed:', err);
   document.getElementById('load-status').textContent = 'Error: ' + err.message;
   document.getElementById('load-bar').style.background = '#ff3333';
+  showServerDownWarning();
 });
+
+// Start server health polling after boot
+pollServerHealth();

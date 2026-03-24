@@ -9,6 +9,32 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Barlow+Condensed:wght@300;400;600;700&display=swap" rel="stylesheet" />
   <style>
+        /* ── Server Down Warning ───────────────────────────── */
+        #server-down-warning {
+          display: none;
+          position: fixed;
+          z-index: 9999;
+          top: 0; left: 0; width: 100vw; height: 100vh;
+          background: rgba(0,0,0,0.85);
+          color: #fff;
+          font-family: var(--font-ui);
+          font-size: 3.5vw;
+          font-weight: 900;
+          letter-spacing: 0.1em;
+          text-align: center;
+          padding-top: 25vh;
+          text-shadow: 0 0 16px #ff3333, 0 0 32px #ff3333;
+          border: 8px solid #ff3333;
+          box-sizing: border-box;
+          animation: server-down-flash 1s infinite alternate;
+          pointer-events: none;
+        }
+        @keyframes server-down-flash {
+          0%   { background: rgba(0,0,0,0.85); color: #fff; border-color: #ff3333; }
+          50%  { background: rgba(80,0,0,0.95); color: #ff3333; border-color: #fff; }
+          100% { background: rgba(0,0,0,0.85); color: #fff; border-color: #ff3333; }
+        }
+      <div id="server-down-warning">SERVER CONNECTION LOST<br>Please check your connection or try again later.</div>
     /* ── Reset & Base ───────────────────────────── */
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
