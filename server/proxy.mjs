@@ -5680,8 +5680,10 @@ const server = http.createServer(async (req, res) => {
       res.writeHead(200);
       res.end(JSON.stringify(payload));
     } catch (err) {
-      res.writeHead(502);
-      res.end(JSON.stringify({ error: err?.message ?? 'traffic request failed' }));
+      if (!res.headersSent) {
+        res.writeHead(502);
+        res.end(JSON.stringify({ error: err?.message ?? 'traffic request failed' }));
+      }
       return;
     }
   } else if (url === '/api/marine/snapshot') {
@@ -5696,8 +5698,10 @@ const server = http.createServer(async (req, res) => {
       res.writeHead(200);
       res.end(JSON.stringify(payload));
     } catch (err) {
-      res.writeHead(502);
-      res.end(JSON.stringify({ error: err?.message ?? 'marine snapshot failed' }));
+      if (!res.headersSent) {
+        res.writeHead(502);
+        res.end(JSON.stringify({ error: err?.message ?? 'marine snapshot failed' }));
+      }
       return;
     }
   } else if (url === '/api/satellite-imagery/health') {
@@ -5750,8 +5754,10 @@ const server = http.createServer(async (req, res) => {
         sentinelHubConfigured: Boolean(SENTINEL_HUB_WMS_URL),
       }));
     } catch (err) {
-      res.writeHead(502);
-      res.end(JSON.stringify({ error: err?.message ?? 'satellite imagery preview failed' }));
+      if (!res.headersSent) {
+        res.writeHead(502);
+        res.end(JSON.stringify({ error: err?.message ?? 'satellite imagery preview failed' }));
+      }
     }
   } else if (url === '/api/satellites/snapshot') {
     const rawMax = parseInt(query.max ?? '0', 10);
@@ -5767,8 +5773,10 @@ const server = http.createServer(async (req, res) => {
       res.writeHead(200);
       res.end(JSON.stringify(payload));
     } catch (err) {
-      res.writeHead(502);
-      res.end(JSON.stringify({ error: err?.message ?? 'satellite snapshot failed' }));
+      if (!res.headersSent) {
+        res.writeHead(502);
+        res.end(JSON.stringify({ error: err?.message ?? 'satellite snapshot failed' }));
+      }
     }
   } else if (url === '/api/cameras/snapshot') {
     const parts = (query.bounds ?? '').split(',').map(Number);
