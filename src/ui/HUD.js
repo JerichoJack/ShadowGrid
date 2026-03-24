@@ -2112,7 +2112,17 @@ function initEntityPicker(viewer) {
   document.body.appendChild(panel);
 
   // ── Click handler ──────────────────────────────────────────────────────────
+  // Track the current aircraft info fetch controller
+  let currentFetchController = null;
+  let fetchInProgress = false;
+
   handler.setInputAction(async (click) => {
+    // Abort any in-progress fetch
+    if (currentFetchController) {
+      currentFetchController.abort();
+      currentFetchController = null;
+    }
+    fetchInProgress = false;
     const pickedEntities = collectPickedEntities(viewer, click.position);
     if (!pickedEntities.length) {
       // Remove glow from previously selected flight
@@ -2190,16 +2200,48 @@ function initEntityPicker(viewer) {
       // Show a loading state immediately, pre-filled with live ADS-B data we already have
       panel.style.display = 'block';
       renderPanel(panel, { icao, callsign, altFt, kts, heading, squawk, vert, provider, dbFlags, classification,
-        typecode: liveTypecode, loading: true }, viewer, entity);
+        typecode: liveTypecode, loading: true, dataSource: 'LOADING' }, viewer, entity);
 
-      // Fetch enrichment in background — pass null callsign if we only have the ICAO hex
-      const info = await fetchAircraftInfo(icao.toLowerCase(), rawCallsign || null);
+      // Setup AbortController for this fetch
+      currentFetchController = new AbortController();
+      fetchInProgress = true;
+      let info = null;
+      try {
+        // Pass controller.signal to fetchAircraftInfo
+        info = await fetchAircraftInfo(icao.toLowerCase(), rawCallsign || null, currentFetchController.signal);
+      } catch (err) {
+        if (err.name === 'AbortError') {
+          // Fetch was aborted, do not update panel
+          return;
+        }
+        // Show error in panel
+        renderPanel(panel, { icao, callsign, altFt, kts, heading, squawk, vert, provider, dbFlags, classification,
+          typecode: liveTypecode, loading: false, error: 'Failed to fetch aircraft info', dataSource: 'ERROR' }, viewer, entity);
+        fetchInProgress = false;
+        return;
+      }
+      fetchInProgress = false;
+      currentFetchController = null;
       // Keep live typecode if enrichment didn't return one
       if (!info.typecode && liveTypecode) info.typecode = liveTypecode;
-      // Persist the enriched typecode into flights.js's cache so Follow can load the
-      // correct 3D asset. This survives update cycles (OpenSky never sends typecodes)
-      // and entity re-creation if the aircraft scrolls out then back into the viewport.
       if (info.typecode) setEnrichedTypecode(icao.toLowerCase(), info.typecode);
+      // Determine data source label
+      let dataSource = 'UNKNOWN';
+      if (info && info.providerErrors && info.providerErrors.length > 0) {
+        dataSource = 'ERROR';
+      } else if (info && info.dbOnly) {
+        dataSource = 'CACHED · Local DB';
+      } else if (info && info.sources && info.sources.length > 0) {
+        // Show the first provider as the source
+        let src = info.sources[0];
+        if (src.includes('adsbdb.com')) dataSource = 'LIVE · ADSBDB API (via Proxy)';
+        else if (src.includes('hexdb.io')) dataSource = 'LIVE · HexDB API (via Proxy)';
+        else if (src.includes('adsb.lol')) dataSource = 'LIVE · ADSB.lol API (via Proxy)';
+        else if (src.includes('airplanes.live')) dataSource = 'LIVE · Airplanes.live API (via Proxy)';
+        else dataSource = 'LIVE · Proxy';
+      } else {
+        dataSource = 'LIVE · Proxy';
+      }
       // Ensure all fields are present for UI and POST
       const panelData = {
         icao,
@@ -2221,6 +2263,10 @@ function initEntityPicker(viewer) {
         year: info.year || '—',
         manufacturer: info.manufacturer || '—',
         model: info.model || '—',
+        providerErrors: info.providerErrors,
+        dbOnly: info.dbOnly,
+        sources: info.sources,
+        dataSource,
       };
       renderPanel(panel, panelData, viewer, entity);
 
@@ -2343,25 +2389,24 @@ const routeCache    = new Map(); // callsign → { route, operator, ts }
 const ROUTE_TTL     = 5 * 60 * 1000; // 5 minutes
 
 async function fetchAircraftInfo(icao) {
-
-
+// Accepts optional AbortSignal for cancellation
+async function fetchAircraftInfo(icao, callsign = null, abortSignal = undefined) {
   const info = { registration: null, typecode: null, typeDesc: null, operator: null, route: null, country: null, year: null, manufacturer: null, model: null };
   let providerErrors = null;
-
+  let sources = [];
   // Only use static aircraft info (cached permanently per ICAO24)
   if (aircraftCache.has(icao)) {
     Object.assign(info, aircraftCache.get(icao));
     providerErrors = aircraftCache.get(icao)?.providerErrors || null;
+    sources = aircraftCache.get(icao)?.sources || [];
   } else {
     let proxyFailed = false;
     let dbOnly = false;
     try {
       let url = `${BACKEND_BASE_URL}/api/proxy/aircraft/${encodeURIComponent(icao.toLowerCase())}`;
-      const r = await fetch(url, { signal: AbortSignal.timeout(7000) });
-      console.log('[fetchAircraftInfo] Proxy request:', url, 'Status:', r.status);
+      const r = await fetch(url, { signal: abortSignal ?? AbortSignal.timeout(7000) });
       if (r.ok) {
         const d = await r.json();
-        console.log('[fetchAircraftInfo] Proxy response:', d);
         if (d && d.ok && d.result) {
           let a = d.result;
           if (a.response && a.response.aircraft) {
@@ -2376,6 +2421,7 @@ async function fetchAircraftInfo(icao) {
           info.manufacturer = a.manufacturer ?? null;
           info.model        = a.model ?? null;
           info.route        = a.route ?? null;
+          sources = d.sources || [];
         } else {
           proxyFailed = true;
           providerErrors = d?.providerErrors || null;
@@ -2386,15 +2432,10 @@ async function fetchAircraftInfo(icao) {
           const d = await r.json();
           providerErrors = d?.providerErrors || null;
         } catch {}
-        if (r.status === 404) {
-          console.warn(`[fetchAircraftInfo] Proxy 404 for ICAO: ${icao}`);
-        } else {
-          console.warn(`[fetchAircraftInfo] Proxy error for ICAO: ${icao}, status: ${r.status}`);
-        }
       }
     } catch (err) {
+      if (err.name === 'AbortError') throw err;
       proxyFailed = true;
-      console.warn(`[fetchAircraftInfo] Proxy fetch failed for ICAO: ${icao}`, err);
     }
     if (proxyFailed) {
       if (aircraftCache.has(icao)) {
@@ -2402,9 +2443,8 @@ async function fetchAircraftInfo(icao) {
         dbOnly = true;
       }
     }
-    aircraftCache.set(icao, { ...info, dbOnly, providerErrors });
+    aircraftCache.set(icao, { ...info, dbOnly, providerErrors, sources });
   }
-
   // Ensure all fields are safe defaults (never undefined)
   return {
     registration: info.registration ?? null,
@@ -2418,6 +2458,7 @@ async function fetchAircraftInfo(icao) {
     model: info.model ?? null,
     providerErrors,
     dbOnly: info.dbOnly || false,
+    sources,
   };
 }
 
@@ -2426,7 +2467,7 @@ async function fetchAircraftInfo(icao) {
 function renderPanel(panel, data, viewer, entity) {
   const {
     icao, callsign, altFt, kts, heading, squawk, vert, provider, dbFlags, classification,
-    registration, typecode, typeDesc, operator, route, country, year, loading, dbOnly, providerErrors
+    registration, typecode, typeDesc, operator, route, country, year, loading, dbOnly, providerErrors, sources, dataSource, error
   } = data;
 
   const altFtStr   = Number.isFinite(altFt) ? `${Math.round(altFt).toLocaleString()} ft`  : '—';
@@ -2459,9 +2500,12 @@ function renderPanel(panel, data, viewer, entity) {
         <span style="font-size:20px;color:${acColor}">${aircraftIcon}</span>
         <div>
           <div style="font-size:15px;font-weight:bold;letter-spacing:0.12em;color:#fff">
-            ${callsign !== icao ? callsign : (registration ?? icao)}
+            <span title="Callsign">${callsign !== icao ? callsign : (registration ?? icao)}</span>
           </div>
-          <div style="opacity:0.55;font-size:10px;margin-top:1px">${icao} ${registration ? '· ' + registration : ''}</div>
+          <div style="opacity:0.55;font-size:10px;margin-top:1px">
+            <span title="ICAO 24-bit Address">ICAO: ${icao}</span>
+            ${registration ? `<span title="Registration"> · REG: ${registration}</span>` : ''}
+          </div>
         </div>
         <div style="display:flex;align-items:center;gap:8px;margin-left:auto">
           <span style="font-size:9px;font-weight:bold;color:${acColor};border:1px solid ${acColor}55;padding:2px 6px;border-radius:3px;letter-spacing:0.1em">${acLabel}</span>
@@ -2471,8 +2515,9 @@ function renderPanel(panel, data, viewer, entity) {
     </div>
 
     <div style="padding:10px 16px">
-      ${loading ? `<div style="opacity:0.45;font-size:10px;margin-bottom:8px">Fetching aircraft data...</div>` : ''}
+      ${loading ? `<div style="opacity:0.45;font-size:10px;margin-bottom:8px">Fetching aircraft data... <span style='font-size:13px;vertical-align:middle'>⏳</span></div>` : ''}
       ${dbOnly ? `<div style="color:#ffb300;font-size:11px;margin-bottom:8px">Online Info Update Failed: Info provided by Server Database</div>` : ''}
+      ${error ? `<div style="color:#ff4444;font-size:11px;margin-bottom:8px">${error}</div>` : ''}
       ${errorHtml}
 
       <table style="width:100%;border-collapse:collapse;font-size:11px">
@@ -2503,7 +2548,7 @@ function renderPanel(panel, data, viewer, entity) {
           ↗ adsb.lol
         </a>
         ${fr24Link ? `<a href="${fr24Link}" target="_blank" style="color:#00ff88;opacity:0.7;text-decoration:none">↗ FlightRadar24</a>` : ''}
-        <span style="margin-left:auto;opacity:0.3;font-size:9px">LIVE · ${provider}</span>
+        <span style="margin-left:auto;opacity:0.5;font-size:9px" title="Data Source">${dataSource || 'LIVE · Proxy'}</span>
       </div>
 
       <div style="margin-top:10px">
@@ -2778,6 +2823,7 @@ function zoneHtml({
       </div>
     </div>
   `;
+}
 }
 
 // Classification colors — must match flights.js
