@@ -5747,8 +5747,8 @@ const server = http.createServer(async (req, res) => {
         collectionId: request.collectionId,
         bands: request.bands,
       });
-      res.writeHead(200);
       if (!res.headersSent) {
+        res.writeHead(200);
         res.end(JSON.stringify({
           ...payload,
           location: { lat: request.lat, lon: request.lon },
