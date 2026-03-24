@@ -5730,8 +5730,10 @@ const server = http.createServer(async (req, res) => {
       bands: String(query.bands ?? ''),
     });
     if (!validation.ok) {
-      res.writeHead(400);
-      res.end(JSON.stringify({ error: validation.error }));
+      if (!res.headersSent) {
+        res.writeHead(400);
+        res.end(JSON.stringify({ error: validation.error }));
+      }
       return;
     }
 
@@ -5746,13 +5748,15 @@ const server = http.createServer(async (req, res) => {
         bands: request.bands,
       });
       res.writeHead(200);
-      res.end(JSON.stringify({
-        ...payload,
-        location: { lat: request.lat, lon: request.lon },
-        request,
-        copernicusDataspaceConfigured: Boolean(COPERNICUS_DATASPACE_WMS_URL),
-        sentinelHubConfigured: Boolean(SENTINEL_HUB_WMS_URL),
-      }));
+      if (!res.headersSent) {
+        res.end(JSON.stringify({
+          ...payload,
+          location: { lat: request.lat, lon: request.lon },
+          request,
+          copernicusDataspaceConfigured: Boolean(COPERNICUS_DATASPACE_WMS_URL),
+          sentinelHubConfigured: Boolean(SENTINEL_HUB_WMS_URL),
+        }));
+      }
     } catch (err) {
       if (!res.headersSent) {
         res.writeHead(502);
