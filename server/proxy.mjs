@@ -5572,7 +5572,6 @@ const server = http.createServer(async (req, res) => {
     res.writeHead(500, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ error: err?.message ?? 'Internal server error' }));
   }
-  // ...existing code...
 
   try {
     if (url.startsWith('/tiles/google/') || url.startsWith('/tiles/maptiler/')) {
@@ -5591,22 +5590,28 @@ const server = http.createServer(async (req, res) => {
     try {
       await handleCameraStreamHealth(res);
     } catch (err) {
-      res.writeHead(502, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: err?.message ?? 'camera stream health failed' }));
+      if (!res.headersSent) {
+        res.writeHead(502, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err?.message ?? 'camera stream health failed' }));
+      }
     }
   } else if (url === '/api/cameras/stream') {
     try {
       await handleCameraStreamProxy(queryParams, res);
     } catch (err) {
-      res.writeHead(502, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: err?.message ?? 'camera stream proxy failed' }));
+      if (!res.headersSent) {
+        res.writeHead(502, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err?.message ?? 'camera stream proxy failed' }));
+      }
     }
   } else if (url.startsWith('/api/cameras/hls/')) {
     try {
       await handleCameraHlsSegment(url, res);
     } catch (err) {
-      res.writeHead(502, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: err?.message ?? 'camera hls segment failed' }));
+      if (!res.headersSent) {
+        res.writeHead(502, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err?.message ?? 'camera hls segment failed' }));
+      }
     }
   } else if (url === '/api/nofly_gps') {
     try {
@@ -5622,8 +5627,10 @@ const server = http.createServer(async (req, res) => {
         cacheHit: payload.cacheHit,
       }));
     } catch (err) {
-      res.writeHead(502);
-      res.end(JSON.stringify({ error: err?.message ?? 'nofly_gps request failed' }));
+      if (!res.headersSent) {
+        res.writeHead(502);
+        res.end(JSON.stringify({ error: err?.message ?? 'nofly_gps request failed' }));
+      }
     }
   } else if (url === '/api/internet') {
     try {
