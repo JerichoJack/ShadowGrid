@@ -1745,6 +1745,32 @@ function classifyAircraftServer(a) {
 }
 
 function enrichAircraftFromDb(a) {
+        // --- UAV fallback: if all fields are empty, but ICAO24 is in known UAV/military range, force UAV icon ---
+        const icao24hex = (a.icao24 || a.icao || a.hex || '').toLowerCase();
+        // US military ICAO range: AE0000–AFFFFF (hex)
+        const isLikelyUSMil = /^ae[0-9a-f]{4}$/i.test(icao24hex);
+        // Known UAV callsign patterns (add more as needed)
+        const csUav = (a.callsign || '').toUpperCase();
+        const regUav = (a.registration || '').toUpperCase();
+        const isLikelyUAV =
+          isLikelyUSMil ||
+          csUav.startsWith('SCORE') ||
+          csUav.startsWith('UAV') ||
+          regUav.startsWith('UAV') ||
+          false;
+        if (
+          (!a.typecode || a.typecode === '') &&
+          (!a.category || a.category === '') &&
+          (!a.model || a.model === '') &&
+          (!a.modelFullName || a.modelFullName === '') &&
+          (!a.categoryDescription || a.categoryDescription === '') &&
+          isLikelyUAV
+        ) {
+          a.typecode = 'Q9';
+          a.category = 'B6';
+          a.icon = 'uav';
+          a.iconScale = 1;
+        }
     // --- Fallback enrichment for missing info fields ---
     // Try to fill missing operator, country, manufacturer, model from aircraftDb or typeDb
     const icao24 = (a.icao24 || a.icao || a.hex || '').toLowerCase();
