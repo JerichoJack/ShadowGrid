@@ -1084,7 +1084,9 @@ function writeTileCache(cacheKey, payload) {
 }
 
 function sendBinaryResponse(res, status, headers, body) {
+  if (res.headersSent) return;
   res.writeHead(status, headers);
+  if (res.headersSent) return;
   res.end(body);
 }
 
@@ -5129,7 +5131,9 @@ async function getFlightsPayload(query = {}) {
 
 async function handleFlights(query, res) {
   const payload = await getFlightsPayload(query);
+  if (res.headersSent) return;
   res.writeHead(200);
+  if (res.headersSent) return;
   res.end(JSON.stringify(payload));
 }
 
@@ -5188,16 +5192,22 @@ const server = http.createServer(async (req, res) => {
     // Accept callsign as query param (legacy: some clients may send ?callsign=...)
     const callsign = query.callsign || query.icao || query.icao24 || null;
     if (!icao) {
+      if (res.headersSent) return;
       res.writeHead(400, { 'Content-Type': 'application/json' });
+      if (res.headersSent) return;
       res.end(JSON.stringify({ error: 'Missing required ICAO or ICAO24 code' }));
       return;
     }
     try {
       const result = await fetchAircraftInfoFromApis(icao, callsign);
+      if (res.headersSent) return;
       res.writeHead(200, { 'Content-Type': 'application/json' });
+      if (res.headersSent) return;
       res.end(JSON.stringify(result));
     } catch (err) {
+      if (res.headersSent) return;
       res.writeHead(502, { 'Content-Type': 'application/json' });
+      if (res.headersSent) return;
       res.end(JSON.stringify({ error: err?.message ?? 'aircraft info proxy failed' }));
     }
     return;
@@ -5211,10 +5221,14 @@ const server = http.createServer(async (req, res) => {
         const data = JSON.parse(body);
         if (!data.icao24) throw new Error('icao24 required');
         upsertAircraftRecord(data);
+        if (res.headersSent) return;
         res.writeHead(200, { 'Content-Type': 'application/json' });
+        if (res.headersSent) return;
         res.end(JSON.stringify({ ok: true }));
       } catch (err) {
+        if (res.headersSent) return;
         res.writeHead(400, { 'Content-Type': 'application/json' });
+        if (res.headersSent) return;
         res.end(JSON.stringify({ error: err.message }));
       }
     });
@@ -5227,7 +5241,9 @@ const server = http.createServer(async (req, res) => {
       return;
     }
   } catch (err) {
+    if (res.headersSent) return;
     res.writeHead(502, { 'Content-Type': 'application/json' });
+    if (res.headersSent) return;
     res.end(JSON.stringify({ error: err?.message ?? 'tile proxy failed' }));
     return;
   }
@@ -5242,7 +5258,9 @@ const server = http.createServer(async (req, res) => {
         res.setHeader('Content-Type', 'application/json');
         await handleCameraStreamHealth(res);
       } catch (err) {
+        if (res.headersSent) return;
         res.writeHead(502, { 'Content-Type': 'application/json' });
+        if (res.headersSent) return;
         res.end(JSON.stringify({ error: err?.message ?? 'camera stream health failed' }));
       }
     } else if (url === '/api/cameras/stream') {
@@ -5250,7 +5268,9 @@ const server = http.createServer(async (req, res) => {
         res.setHeader('Content-Type', 'application/json');
         await handleCameraStreamProxy(queryParams, res);
       } catch (err) {
+        if (res.headersSent) return;
         res.writeHead(502, { 'Content-Type': 'application/json' });
+        if (res.headersSent) return;
         res.end(JSON.stringify({ error: err?.message ?? 'camera stream proxy failed' }));
       }
     } else if (url.startsWith('/api/cameras/hls/')) {
@@ -5258,7 +5278,9 @@ const server = http.createServer(async (req, res) => {
         res.setHeader('Content-Type', 'application/json');
         await handleCameraHlsSegment(url, res);
       } catch (err) {
+        if (res.headersSent) return;
         res.writeHead(502, { 'Content-Type': 'application/json' });
+        if (res.headersSent) return;
         res.end(JSON.stringify({ error: err?.message ?? 'camera hls segment failed' }));
       }
     } else if (url === '/api/nofly_gps') {
@@ -5267,7 +5289,9 @@ const server = http.createServer(async (req, res) => {
         const parts = (query.bounds ?? '').split(',').map(Number);
         const bounds = (parts.length === 4 && parts.every(n => Number.isFinite(n))) ? parts : null;
         const payload = await getOverlayPayload(bounds);
+        if (res.headersSent) return;
         res.writeHead(200);
+        if (res.headersSent) return;
         res.end(JSON.stringify({
           ts: payload.ts,
           maxFlightHeightMeters: payload.maxFlightHeightMeters,
@@ -5276,7 +5300,9 @@ const server = http.createServer(async (req, res) => {
           cacheHit: payload.cacheHit,
         }));
       } catch (err) {
+        if (res.headersSent) return;
         res.writeHead(502, { 'Content-Type': 'application/json' });
+        if (res.headersSent) return;
         res.end(JSON.stringify({ error: err?.message ?? 'nofly_gps request failed' }));
       }
     } else if (url === '/api/internet') {
@@ -5284,58 +5310,72 @@ const server = http.createServer(async (req, res) => {
         const parts = (query.bounds ?? '').split(',').map(Number);
         const bounds = (parts.length === 4 && parts.every(n => Number.isFinite(n))) ? parts : null;
         const payload = await getOverlayPayload(bounds);
-        if (!res.headersSent) {
-          res.writeHead(200);
-          res.end(JSON.stringify({
-            ts: payload.ts,
-            maxFlightHeightMeters: payload.maxFlightHeightMeters,
-            internetBlackouts: payload.internetBlackouts,
-            cacheHit: payload.cacheHit,
-          }));
-        }
+        if (res.headersSent) return;
+        res.writeHead(200);
+        if (res.headersSent) return;
+        res.end(JSON.stringify({
+          ts: payload.ts,
+          maxFlightHeightMeters: payload.maxFlightHeightMeters,
+          internetBlackouts: payload.internetBlackouts,
+          cacheHit: payload.cacheHit,
+        }));
         return;
       } catch (err) {
         console.error('[proxy] /api/internet error:', err);
-        if (!res.headersSent) {
-          res.writeHead(502);
-          res.end(JSON.stringify({ error: err?.message ?? 'internet request failed' }));
-        }
+        if (res.headersSent) return;
+        res.writeHead(502);
+        if (res.headersSent) return;
+        res.end(JSON.stringify({ error: err?.message ?? 'internet request failed' }));
         return;
       }
     } else if (url === '/api/traffic/google') {
       const parts = (query.bounds ?? '').split(',').map(Number);
       if (parts.length !== 4 || parts.some(n => !Number.isFinite(n))) {
+        if (res.headersSent) return;
         res.writeHead(400);
+        if (res.headersSent) return;
         res.end(JSON.stringify({ error: 'bounds must be minLon,minLat,maxLon,maxLat' }));
         return;
       }
       try {
         const payload = await getTrafficPayload(parts);
+        if (res.headersSent) return;
         res.writeHead(200);
+        if (res.headersSent) return;
         res.end(JSON.stringify(payload));
       } catch (err) {
+        if (res.headersSent) return;
         res.writeHead(502);
+        if (res.headersSent) return;
         res.end(JSON.stringify({ error: err?.message ?? 'traffic request failed' }));
         return;
       }
     } else if (url === '/api/marine/snapshot') {
       const parts = (query.bounds ?? '').split(',').map(Number);
       if (parts.length !== 4 || parts.some(n => !Number.isFinite(n))) {
+        if (res.headersSent) return;
         res.writeHead(400);
+        if (res.headersSent) return;
         res.end(JSON.stringify({ error: 'bounds must be minLon,minLat,maxLon,maxLat' }));
         return;
       }
       try {
         const payload = await getMarinePayload(parts);
+        if (res.headersSent) return;
         res.writeHead(200);
+        if (res.headersSent) return;
         res.end(JSON.stringify(payload));
       } catch (err) {
+        if (res.headersSent) return;
         res.writeHead(502);
+        if (res.headersSent) return;
         res.end(JSON.stringify({ error: err?.message ?? 'marine snapshot failed' }));
         return;
       }
     } else if (url === '/api/satellite-imagery/health') {
+      if (res.headersSent) return;
       res.writeHead(200);
+      if (res.headersSent) return;
       res.end(JSON.stringify({
         ok: true,
         ts: Date.now(),
@@ -5352,26 +5392,36 @@ const server = http.createServer(async (req, res) => {
         .filter(Boolean);
       try {
         const payload = await getSatellitesSnapshotPayload(maxCount, { perCategory, categories });
+        if (res.headersSent) return;
         res.writeHead(200);
+        if (res.headersSent) return;
         res.end(JSON.stringify(payload));
       } catch (err) {
+        if (res.headersSent) return;
         res.writeHead(502);
+        if (res.headersSent) return;
         res.end(JSON.stringify({ error: err?.message ?? 'satellite snapshot failed' }));
       }
     } else if (url === '/api/cameras/snapshot') {
       const parts = (query.bounds ?? '').split(',').map(Number);
       if (parts.length !== 4 || parts.some(n => !Number.isFinite(n))) {
+        if (res.headersSent) return;
         res.writeHead(400);
+        if (res.headersSent) return;
         res.end(JSON.stringify({ error: 'bounds must be minLon,minLat,maxLon,maxLat' }));
         return;
       }
       const maxCount = Math.max(parseInt(query.max ?? `${CAMERA_MAX_POINTS}`, 10) || CAMERA_MAX_POINTS, 1);
       try {
         const payload = await getCameraSnapshot(parts, maxCount);
+        if (res.headersSent) return;
         res.writeHead(200);
+        if (res.headersSent) return;
         res.end(JSON.stringify(payload));
       } catch (err) {
+        if (res.headersSent) return;
         res.writeHead(502);
+        if (res.headersSent) return;
         res.end(JSON.stringify({ error: err?.message ?? 'camera snapshot failed' }));
         return;
       }
@@ -5444,8 +5494,10 @@ const server = http.createServer(async (req, res) => {
               cameras: payload.cameras?.cacheHit ?? null,
             },
           };
-          if (!res.headersSent && !aborted && !req.aborted) {
+          if (res.headersSent) return;
+          if (!aborted && !req.aborted) {
             res.writeHead(200);
+            if (res.headersSent) return;
             res.end(JSON.stringify(payload));
           }
         } finally {
@@ -5453,16 +5505,18 @@ const server = http.createServer(async (req, res) => {
         }
         return;
       } catch (err) {
-        if (!res.headersSent) {
-          res.writeHead(502);
-          res.end(JSON.stringify({ error: err?.message ?? 'world snapshot failed' }));
-        }
+        if (res.headersSent) return;
+        res.writeHead(502);
+        if (res.headersSent) return;
+        res.end(JSON.stringify({ error: err?.message ?? 'world snapshot failed' }));
         return;
       }
     } else if (url === '/health') {
       ensureTileCacheDir();
       const tileEntries = fs.readdirSync(TILE_CACHE_DIR).filter(name => name.endsWith('.json')).length;
+      if (res.headersSent) return;
       res.writeHead(200);
+      if (res.headersSent) return;
       res.end(JSON.stringify({
         status: 'ok',
         db: db.size,
@@ -5483,11 +5537,15 @@ const server = http.createServer(async (req, res) => {
         },
       }));
     } else {
+      if (res.headersSent) return;
       res.writeHead(404, { 'Content-Type': 'application/json' });
+      if (res.headersSent) return;
       res.end(JSON.stringify({ error: 'Not found' }));
     }
   } catch (err) {
+    if (res.headersSent) return;
     res.writeHead(500, { 'Content-Type': 'application/json' });
+    if (res.headersSent) return;
     res.end(JSON.stringify({ error: err?.message ?? 'Internal server error' }));
   }
 
