@@ -5734,6 +5734,7 @@ const server = http.createServer(async (req, res) => {
       if (!res.headersSent) {
         res.writeHead(400);
         res.end(JSON.stringify({ error: validation.error }));
+        return;
       }
       return;
     }
@@ -5757,12 +5758,16 @@ const server = http.createServer(async (req, res) => {
           copernicusDataspaceConfigured: Boolean(COPERNICUS_DATASPACE_WMS_URL),
           sentinelHubConfigured: Boolean(SENTINEL_HUB_WMS_URL),
         }));
+        return;
       }
+      return;
     } catch (err) {
       if (!res.headersSent) {
         res.writeHead(502);
         res.end(JSON.stringify({ error: err?.message ?? 'satellite imagery preview failed' }));
+        return;
       }
+      return;
     }
   } else if (url === '/api/satellites/snapshot') {
     const rawMax = parseInt(query.max ?? '0', 10);
