@@ -5688,11 +5688,8 @@ const server = http.createServer(async (req, res) => {
       bands: String(query.bands ?? ''),
     });
     if (!validation.ok) {
-      if (!res.headersSent) {
-        res.writeHead(400);
-        res.end(JSON.stringify({ error: validation.error }));
-        return;
-      }
+      res.writeHead(400);
+      res.end(JSON.stringify({ error: validation.error }));
       return;
     }
 
@@ -5706,25 +5703,17 @@ const server = http.createServer(async (req, res) => {
         collectionId: request.collectionId,
         bands: request.bands,
       });
-      if (!res.headersSent) {
-        res.writeHead(200);
-        res.end(JSON.stringify({
-          ...payload,
-          location: { lat: request.lat, lon: request.lon },
-          request,
-          copernicusDataspaceConfigured: Boolean(COPERNICUS_DATASPACE_WMS_URL),
-          sentinelHubConfigured: Boolean(SENTINEL_HUB_WMS_URL),
-        }));
-        return;
-      }
-      return;
+      res.writeHead(200);
+      res.end(JSON.stringify({
+        ...payload,
+        location: { lat: request.lat, lon: request.lon },
+        request,
+        copernicusDataspaceConfigured: Boolean(COPERNICUS_DATASPACE_WMS_URL),
+        sentinelHubConfigured: Boolean(SENTINEL_HUB_WMS_URL),
+      }));
     } catch (err) {
-      if (!res.headersSent) {
-        res.writeHead(502);
-        res.end(JSON.stringify({ error: err?.message ?? 'satellite imagery preview failed' }));
-        return;
-      }
-      return;
+      res.writeHead(502);
+      res.end(JSON.stringify({ error: err?.message ?? 'satellite imagery preview failed' }));
     }
   } else if (url === '/api/satellites/snapshot') {
     const rawMax = parseInt(query.max ?? '0', 10);
