@@ -2590,8 +2590,8 @@ function boundsIntersect(a, b) {
 async function loadSafeAirspaceWarnings(bounds) {
   try {
     const [html, topoPayload] = await Promise.all([
-      fetchText(SAFE_AIRSPACE_MAP_URL),
-      fetchJson(`${IODA_API_BASE_URL}/topo/country`),
+      fetchText(SAFE_AIRSPACE_MAP_URL, 8000),
+      fetchJson(`${IODA_API_BASE_URL}/topo/country`, 8000),
     ]);
     const items = parseSafeAirspaceFeedItems(html);
     const featureMap = buildCountryFeatureMapByName(topoPayload);
@@ -2647,8 +2647,8 @@ async function loadIodaBlackouts() {
     const until = Math.floor(Date.now() / 1000);
     const from = until - IODA_BLACKOUT_LOOKBACK_SEC;
     const [summaryPayload, topoPayload] = await Promise.all([
-      fetchJson(`${IODA_API_BASE_URL}/outages/summary?entityType=country&from=${from}&until=${until}&limit=${IODA_COUNTRY_SUMMARY_LIMIT}`),
-      fetchJson(`${IODA_API_BASE_URL}/topo/country`),
+      fetchJson(`${IODA_API_BASE_URL}/outages/summary?entityType=country&from=${from}&until=${until}&limit=${IODA_COUNTRY_SUMMARY_LIMIT}`, 8000),
+      fetchJson(`${IODA_API_BASE_URL}/topo/country`, 8000),
     ]);
 
     const countryFeatureMap = buildCountryFeatureMap(topoPayload);
@@ -2668,7 +2668,7 @@ async function loadIodaBlackouts() {
     const eventSets = await Promise.all(rankedSummaries.slice(0, IODA_EVENT_ENRICH_LIMIT).map(async ({ code, summary }) => {
       const encodedCode = encodeURIComponent(code);
       try {
-        const payload = await fetchJson(`${IODA_API_BASE_URL}/outages/events?entityType=country&entityCode=${encodedCode}&from=${from}&until=${until}&limit=10&format=ioda`);
+        const payload = await fetchJson(`${IODA_API_BASE_URL}/outages/events?entityType=country&entityCode=${encodedCode}&from=${from}&until=${until}&limit=10&format=ioda`, 8000);
         return [code, { summary, events: Array.isArray(payload?.data) ? payload.data : [] }];
       } catch {
         return [code, { summary, events: [] }];
