@@ -466,19 +466,141 @@ function getImageryIntent(collectionId, bands) {
   return { falseColor, prefersSentinelHub, prefersLandsat };
 }
 
+function getConfiguredSatelliteProvider() {
+  const provider = String(BACKEND_SATELLITE_IMAGERY_PROVIDER || '').trim().toLowerCase();
+  if (provider === 'nasa-gibs') return 'nasa-gibs';
+  if (provider === 'sentinel-hub') return 'sentinel-hub';
+  if (provider === 'copernicus-dataspace') return 'copernicus-dataspace';
+  return null;
+}
+
+function getNasaGibsLayerCandidates(collectionId, bands) {
+  const id = String(collectionId || '').toUpperCase();
+  const normalizedBands = String(bands || '').toUpperCase().replace(/\s+/g, '');
+  const falseColor = normalizedBands.includes('B8') || normalizedBands.includes('B11') || normalizedBands.includes('SR_B5');
+
+  if (id === 'NOAA/VIIRS/DNB/MONTHLY_V1/VCMSLCFG' || id === 'NOAA/VIIRS/DNB/MONTHLY_V1/VCMCFG' || id === 'NASA/VIIRS/VNP46A1') {
+    return [
+      {
+        layer: 'VIIRS_SNPP_GapFilled_BRDF_Corrected_DayNightBand_Radiance',
+        note: id === 'NASA/VIIRS/VNP46A1'
+          ? 'NASA GIBS VIIRS gap-filled night radiance composite (VNP46A1-compatible mapping).'
+          : 'NASA GIBS VIIRS gap-filled night radiance composite.',
+        bandNote: id === 'NASA/VIIRS/VNP46A1'
+          ? 'Requested VNP46A1 night-lights band mapped to VIIRS gap-filled night-radiance imagery.'
+          : 'Requested radiance mapped to VIIRS gap-filled night-radiance imagery.',
+      },
+      {
+        layer: 'VIIRS_SNPP_DayNightBand_At_Sensor_Radiance',
+        note: 'NASA GIBS VIIRS Day/Night Band at-sensor radiance composite.',
+        bandNote: 'Fallback mapped to VIIRS Day/Night Band at-sensor radiance imagery.',
+      },
+      {
+        layer: 'VIIRS_Black_Marble',
+        note: 'NASA GIBS VIIRS Black Marble legacy annual composite.',
+        bandNote: 'Final fallback mapped to legacy Black Marble annual imagery (limited dates).',
+      },
+    ];
+  }
+
+  if (id === 'MODIS/061/MYD09GA') {
+    return [
+      {
+        layer: falseColor ? 'MODIS_Aqua_CorrectedReflectance_Bands721' : 'MODIS_Aqua_CorrectedReflectance_TrueColor',
+        note: falseColor ? 'NASA GIBS MODIS Aqua false-color composite.' : 'NASA GIBS MODIS Aqua true-color daily composite.',
+        bandNote: falseColor ? 'Requested false-color bands mapped to MODIS Aqua Bands 7-2-1.' : 'Requested bands mapped to NASA GIBS MODIS Aqua true-color imagery.',
+      },
+      {
+        layer: falseColor ? 'MODIS_Terra_CorrectedReflectance_Bands367' : 'MODIS_Terra_CorrectedReflectance_TrueColor',
+        note: falseColor ? 'NASA GIBS MODIS Terra false-color fallback composite.' : 'NASA GIBS MODIS Terra true-color fallback composite.',
+        bandNote: falseColor ? 'Fell back to MODIS Terra false-color layer.' : 'Fell back to MODIS Terra true-color layer.',
+      },
+    ];
+  }
+
+  if (id.startsWith('NOAA/GOES/16/')) {
+    return [
+      {
+        layer: 'GOES-East_ABI_GeoColor',
+        note: 'NASA GIBS GOES-East ABI GeoColor composite.',
+        bandNote: 'Requested GOES bands mapped to ABI GeoColor imagery.',
+      },
+    ];
+  }
+
+  if (id.startsWith('NOAA/GOES/17/') || id.startsWith('NOAA/GOES/18/')) {
+    return [
+      {
+        layer: 'GOES-West_ABI_GeoColor',
+        note: 'NASA GIBS GOES-West ABI GeoColor composite.',
+        bandNote: 'Requested GOES bands mapped to ABI GeoColor imagery.',
+      },
+    ];
+  }
+
+  if (id.startsWith('NOAA/VIIRS/')) {
+    return [
+      {
+        layer: falseColor ? 'VIIRS_SNPP_CorrectedReflectance_BandsM11-I2-I1' : 'VIIRS_SNPP_CorrectedReflectance_TrueColor',
+        note: falseColor ? 'NASA GIBS VIIRS SNPP false-color composite.' : 'NASA GIBS VIIRS SNPP true-color daily composite.',
+        bandNote: falseColor ? 'Requested bands mapped to VIIRS M11-I2-I1 false-color imagery.' : 'Requested bands mapped to VIIRS SNPP true-color imagery.',
+      },
+      {
+        layer: falseColor ? 'MODIS_Terra_CorrectedReflectance_Bands367' : 'MODIS_Terra_CorrectedReflectance_TrueColor',
+        note: falseColor ? 'NASA GIBS MODIS false-color fallback composite.' : 'NASA GIBS MODIS true-color fallback composite.',
+        bandNote: falseColor ? 'Fell back to MODIS false-color layer.' : 'Fell back to MODIS true-color layer.',
+      },
+    ];
+  }
+
+  return [
+    {
+      layer: falseColor ? 'MODIS_Terra_CorrectedReflectance_Bands367' : 'MODIS_Terra_CorrectedReflectance_TrueColor',
+      note: falseColor ? 'NASA GIBS MODIS false-color composite.' : 'NASA GIBS MODIS true-color daily composite.',
+      bandNote: falseColor ? 'Requested false-color bands mapped to MODIS Bands 3-6-7.' : 'Requested bands mapped to NASA GIBS true-color imagery.',
+    },
+  ];
+}
+
 function pickSatelliteSourceOrder(source, collectionId, bands) {
   const requested = String(source || 'auto').toLowerCase();
-  const intent = getImageryIntent(collectionId, bands);
-  if (requested === 'nasa-gibs') return ['nasa-gibs', 'basemap'];
-  if (requested === 'sentinel-hub') return ['sentinel-hub', 'nasa-gibs', 'basemap'];
+  const policy = getCollectionBackendPolicy(collectionId);
   if (requested === 'basemap') return ['basemap'];
-  if (intent.prefersSentinelHub && SENTINEL_HUB_WMS_URL) {
-    return ['sentinel-hub', 'nasa-gibs', 'basemap'];
+  if (requested === 'nasa-gibs') return ['nasa-gibs', 'basemap'];
+  if (requested === 'sentinel-hub') return ['sentinel-hub', 'basemap'];
+  if (requested === 'copernicus-dataspace') return ['copernicus-dataspace', 'basemap'];
+
+  const autoOrder = [];
+  const configuredProvider = getConfiguredSatelliteProvider();
+  const canUseCopernicus = Boolean(COPERNICUS_DATASPACE_WMS_URL);
+  const canUseSentinel = Boolean(SENTINEL_HUB_WMS_URL);
+
+  if (configuredProvider === 'copernicus-dataspace' && canUseCopernicus) {
+    autoOrder.push('copernicus-dataspace');
   }
-  if (intent.prefersLandsat && SENTINEL_HUB_WMS_URL) {
-    return ['sentinel-hub', 'nasa-gibs', 'basemap'];
+  if (configuredProvider === 'sentinel-hub' && canUseSentinel) {
+    autoOrder.push('sentinel-hub');
   }
-  return ['nasa-gibs', 'sentinel-hub', 'basemap'];
+  if (configuredProvider === 'nasa-gibs') {
+    autoOrder.push('nasa-gibs');
+  }
+
+  if (policy.preferredBackend === 'copernicus-dataspace') {
+    if (canUseCopernicus) autoOrder.push('copernicus-dataspace');
+    if (canUseSentinel) autoOrder.push('sentinel-hub');
+  } else if (policy.preferredBackend === 'sentinel-hub') {
+    if (canUseSentinel) autoOrder.push('sentinel-hub');
+    if (canUseCopernicus) autoOrder.push('copernicus-dataspace');
+  } else {
+    autoOrder.push(policy.preferredBackend);
+    if (canUseCopernicus) autoOrder.push('copernicus-dataspace');
+    if (canUseSentinel) autoOrder.push('sentinel-hub');
+  }
+
+  autoOrder.push('nasa-gibs');
+
+  autoOrder.push('basemap');
+  return [...new Set(autoOrder)];
 }
 
 function buildWmsPreviewUrl(baseUrl, { layer, rectangle, date, format = 'image/jpeg', width = SATELLITE_PREVIEW_IMAGE_SIZE, height = SATELLITE_PREVIEW_IMAGE_SIZE }) {
@@ -514,25 +636,28 @@ async function verifyPreviewUrl(url) {
 async function buildNasaGibsPreview({ lat, lon, date, collectionId, bands }) {
   const rectangle = computeImageryRectangle(lat, lon, 120);
   const isoDate = normalizeIsoDate(date);
-  const { falseColor } = getImageryIntent(collectionId, bands);
-  const layer = falseColor
-    ? 'MODIS_Terra_CorrectedReflectance_Bands367'
-    : 'MODIS_Terra_CorrectedReflectance_TrueColor';
-  const previewUrl = buildWmsPreviewUrl(NASA_GIBS_WMS_URL, { layer, rectangle, date: isoDate });
-  await verifyPreviewUrl(previewUrl);
-  return {
-    provider: 'nasa-gibs',
-    providerLabel: 'NASA GIBS',
-    previewUrl,
-    rectangle,
-    date: isoDate,
-    note: falseColor
-      ? 'NASA GIBS MODIS false-color composite.'
-      : 'NASA GIBS MODIS true-color daily composite.',
-    bandNote: falseColor
-      ? 'Requested false-color bands mapped to MODIS Bands 3-6-7.'
-      : 'Requested bands mapped to NASA GIBS true-color imagery.',
-  };
+  const candidates = getNasaGibsLayerCandidates(collectionId, bands);
+  const failures = [];
+
+  for (const candidate of candidates) {
+    try {
+      const previewUrl = buildWmsPreviewUrl(NASA_GIBS_WMS_URL, { layer: candidate.layer, rectangle, date: isoDate });
+      await verifyPreviewUrl(previewUrl);
+      return {
+        provider: 'nasa-gibs',
+        providerLabel: 'NASA GIBS',
+        previewUrl,
+        rectangle,
+        date: isoDate,
+        note: candidate.note,
+        bandNote: candidate.bandNote,
+      };
+    } catch (err) {
+      failures.push(`${candidate.layer}: ${err?.message ?? 'failed'}`);
+    }
+  }
+
+  throw new Error(`NASA GIBS preview failed for '${collectionId}'. ${failures.join(' | ')}`);
 }
 
 async function buildSentinelHubPreview({ lat, lon, date, collectionId, bands }) {
@@ -558,23 +683,52 @@ async function buildSentinelHubPreview({ lat, lon, date, collectionId, bands }) 
   };
 }
 
+async function buildCopernicusDataspacePreview({ lat, lon, date, collectionId, bands }) {
+  if (!COPERNICUS_DATASPACE_WMS_URL) {
+    throw new Error('Copernicus Data Space is not configured on the server');
+  }
+  const rectangle = computeImageryRectangle(lat, lon, 60);
+  const isoDate = normalizeIsoDate(date);
+  const { falseColor } = getImageryIntent(collectionId, bands);
+  const layer = falseColor ? COPERNICUS_DATASPACE_FALSE_COLOR_LAYER : COPERNICUS_DATASPACE_TRUE_COLOR_LAYER;
+  const previewUrl = buildWmsPreviewUrl(COPERNICUS_DATASPACE_WMS_URL, { layer, rectangle, date: `${isoDate}/${isoDate}` });
+  await verifyPreviewUrl(previewUrl);
+  return {
+    provider: 'copernicus-dataspace',
+    providerLabel: 'Copernicus Data Space',
+    previewUrl,
+    rectangle,
+    date: isoDate,
+    note: `Copernicus Data Space WMS layer ${layer}.`,
+    bandNote: falseColor
+      ? 'Copernicus Data Space false-color layer requested.'
+      : 'Copernicus Data Space true-color layer requested.',
+  };
+}
+
 async function resolveSatelliteImageryPreview({ lat, lon, date, source, collectionId, bands }) {
   const order = pickSatelliteSourceOrder(source, collectionId, bands);
+  const backendPolicy = getCollectionBackendPolicy(collectionId);
   const failures = [];
   for (const candidate of order) {
     try {
+      if (candidate === 'copernicus-dataspace') {
+        const payload = await buildCopernicusDataspacePreview({ lat, lon, date, collectionId, bands });
+        return { ...payload, backendPolicy, requestedSource: String(source || 'auto').toLowerCase(), fallbackCount: failures.length, failures };
+      }
       if (candidate === 'nasa-gibs') {
         const payload = await buildNasaGibsPreview({ lat, lon, date, collectionId, bands });
-        return { ...payload, requestedSource: String(source || 'auto').toLowerCase(), fallbackCount: failures.length, failures };
+        return { ...payload, backendPolicy, requestedSource: String(source || 'auto').toLowerCase(), fallbackCount: failures.length, failures };
       }
       if (candidate === 'sentinel-hub') {
         const payload = await buildSentinelHubPreview({ lat, lon, date, collectionId, bands });
-        return { ...payload, requestedSource: String(source || 'auto').toLowerCase(), fallbackCount: failures.length, failures };
+        return { ...payload, backendPolicy, requestedSource: String(source || 'auto').toLowerCase(), fallbackCount: failures.length, failures };
       }
       if (candidate === 'basemap') {
         return {
           provider: 'basemap',
           providerLabel: 'Globe Basemap',
+          backendPolicy,
           requestedSource: String(source || 'auto').toLowerCase(),
           previewUrl: null,
           rectangle: computeImageryRectangle(lat, lon, 90),
