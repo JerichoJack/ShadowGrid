@@ -5395,49 +5395,6 @@ const server = http.createServer(async (req, res) => {
         copernicusDataspaceConfigured: Boolean(COPERNICUS_DATASPACE_WMS_URL),
         sentinelHubConfigured: Boolean(SENTINEL_HUB_WMS_URL),
       }));
-    } else if (url === '/api/satellite-imagery/preview') {
-      const lat = Number(query.lat);
-      const lon = Number(query.lon);
-      if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
-        res.writeHead(400);
-        res.end(JSON.stringify({ error: 'lat and lon are required numeric query params' }));
-        return;
-      }
-      const validation = validateSatelliteImageryRequest({
-        lat,
-        lon,
-        date: String(query.date ?? ''),
-        source: String(query.source ?? 'auto'),
-        collectionId: String(query.collection ?? ''),
-        bands: String(query.bands ?? ''),
-      });
-      if (!validation.ok) {
-        res.writeHead(400);
-        res.end(JSON.stringify({ error: validation.error }));
-        return;
-      }
-      const request = validation.value;
-      try {
-        const payload = await resolveSatelliteImageryPreview({
-          lat: request.lat,
-          lon: request.lon,
-          date: request.date,
-          source: request.source,
-          collectionId: request.collectionId,
-          bands: request.bands,
-        });
-        res.writeHead(200);
-        res.end(JSON.stringify({
-          ...payload,
-          location: { lat: request.lat, lon: request.lon },
-          request,
-          copernicusDataspaceConfigured: Boolean(COPERNICUS_DATASPACE_WMS_URL),
-          sentinelHubConfigured: Boolean(SENTINEL_HUB_WMS_URL),
-        }));
-      } catch (err) {
-        res.writeHead(502);
-        res.end(JSON.stringify({ error: err?.message ?? 'satellite imagery preview failed' }));
-      }
     } else if (url === '/api/satellites/snapshot') {
       const rawMax = parseInt(query.max ?? '0', 10);
       const maxCount = rawMax > 0 ? rawMax : Infinity;
