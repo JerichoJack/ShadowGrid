@@ -5137,12 +5137,6 @@ async function handleFlights(query, res) {
   res.end(JSON.stringify(payload));
 }
 
-import http from 'http';
-import fs from 'fs';
-import path from 'path';
-
-const PORT = process.env.PORT || 3000;
-
 /* ───────────────────────── ROUTER CORE ───────────────────────── */
 
 const routes = [];
