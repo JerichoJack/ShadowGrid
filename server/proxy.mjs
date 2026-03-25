@@ -5283,8 +5283,10 @@ const server = http.createServer(async (req, res) => {
           cacheHit: payload.cacheHit,
         }));
       } catch (err) {
-        res.writeHead(502, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: err?.message ?? 'nofly_gps request failed' }));
+        if (!res.headersSent) {
+          res.writeHead(502, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: err?.message ?? 'nofly_gps request failed' }));
+        }
       }
       return;
     } else if (url === '/api/internet') {
@@ -5321,8 +5323,10 @@ const server = http.createServer(async (req, res) => {
         res.writeHead(200);
         res.end(JSON.stringify(payload));
       } catch (err) {
-        res.writeHead(502);
-        res.end(JSON.stringify({ error: err?.message ?? 'traffic request failed' }));
+        if (!res.headersSent) {
+          res.writeHead(502);
+          res.end(JSON.stringify({ error: err?.message ?? 'traffic request failed' }));
+        }
         return;
       }
     } else if (url === '/api/marine/snapshot') {
@@ -5337,8 +5341,10 @@ const server = http.createServer(async (req, res) => {
         res.writeHead(200);
         res.end(JSON.stringify(payload));
       } catch (err) {
-        res.writeHead(502);
-        res.end(JSON.stringify({ error: err?.message ?? 'marine snapshot failed' }));
+        if (!res.headersSent) {
+          res.writeHead(502);
+          res.end(JSON.stringify({ error: err?.message ?? 'marine snapshot failed' }));
+        }
         return;
       }
     } else if (url === '/api/satellite-imagery/health') {
@@ -5363,8 +5369,10 @@ const server = http.createServer(async (req, res) => {
         res.writeHead(200);
         res.end(JSON.stringify(payload));
       } catch (err) {
-        res.writeHead(502);
-        res.end(JSON.stringify({ error: err?.message ?? 'satellite snapshot failed' }));
+        if (!res.headersSent) {
+          res.writeHead(502);
+          res.end(JSON.stringify({ error: err?.message ?? 'satellite snapshot failed' }));
+        }
       }
     } else if (url === '/api/cameras/snapshot') {
       const parts = parseBounds(query);
@@ -5379,8 +5387,10 @@ const server = http.createServer(async (req, res) => {
         res.writeHead(200);
         res.end(JSON.stringify(payload));
       } catch (err) {
-        res.writeHead(502);
-        res.end(JSON.stringify({ error: err?.message ?? 'camera snapshot failed' }));
+        if (!res.headersSent) {
+          res.writeHead(502);
+          res.end(JSON.stringify({ error: err?.message ?? 'camera snapshot failed' }));
+        }
         return;
       }
     } else if (url === '/api/world/snapshot') {
@@ -5401,88 +5411,88 @@ const server = http.createServer(async (req, res) => {
         // Optionally, listen for abort and set a flag
         let aborted = false;
         const onAborted = () => { aborted = true; };
-        req.on('aborted', onAborted);
-
         try {
-          const payload = { ts: Date.now(), mode: SERVER_HEAVY_MODE ? 'heavy' : 'normal' };
-          const flightsPromise = include.has('flights')
-            ? getFlightsPayload({
-              bounds: bounds ? bounds.join(',') : '',
-              mode: 'heavy',
-            })
-            : null;
-          const satellitesPromise = include.has('satellites')
-            ? getSatellitesSnapshotPayload(maxSat, { perCategory: satPerCategory, categories: satCategories })
-            : null;
-          const trafficPromise = (include.has('traffic') && bounds)
-            ? getTrafficPayload(bounds)
-            : null;
-          const marinePromise = (include.has('marine') && bounds)
-            ? getMarinePayload(bounds)
-            : null;
-          const camerasPromise = (include.has('cameras') && bounds)
-            ? getCameraSnapshot(bounds, maxCam)
-            : null;
-          const [flightsPayload, satellitesPayload, trafficPayload, marinePayload, camerasPayload] = await Promise.all([
-            flightsPromise,
-            satellitesPromise,
-            trafficPromise,
-            marinePromise,
-            camerasPromise,
-          ]);
-          if (aborted || req.aborted) return;
-          if (flightsPayload) payload.flights = flightsPayload;
-          if (satellitesPayload) payload.satellites = satellitesPayload;
-          if (trafficPayload) payload.traffic = trafficPayload;
-          if (marinePayload) payload.marine = marinePayload;
-          if (camerasPayload) payload.cameras = camerasPayload;
-          payload.diagnostics = {
-            providers: {
-              flights: payload.flights?.source ?? null,
-              satellites: payload.satellites?.source ?? null,
-              traffic: payload.traffic?.source ?? null,
-              marine: payload.marine?.source ?? null,
-              cameras: payload.cameras?.source ?? null,
-            },
-            cache: {
-              flights: payload.flights?.cacheHit ?? null,
-              satellites: payload.satellites?.cacheHit ?? null,
-              traffic: payload.traffic?.cacheHit ?? null,
-              marine: payload.marine?.cacheHit ?? null,
-              cameras: payload.cameras?.cacheHit ?? null,
-            },
-          };
-          if (!res.headersSent && !aborted && !req.aborted) {
-            res.writeHead(200);
-            res.end(JSON.stringify(payload));
+          // Guard: if request is aborted, do not proceed
+          if (req.aborted) return;
+
+          // Optionally, listen for abort and set a flag
+          let aborted = false;
+          const onAborted = () => { aborted = true; };
+          req.on('aborted', onAborted);
+
+          try {
+            const payload = { ts: Date.now(), mode: SERVER_HEAVY_MODE ? 'heavy' : 'normal' };
+            const flightsPromise = include.has('flights')
+              ? getFlightsPayload({
+                bounds: bounds ? bounds.join(',') : '',
+                mode: 'heavy',
+              })
+              : null;
+            const satellitesPromise = include.has('satellites')
+              ? getSatellitesSnapshotPayload(maxSat, { perCategory: satPerCategory, categories: satCategories })
+              : null;
+            const trafficPromise = (include.has('traffic') && bounds)
+              ? getTrafficPayload(bounds)
+              : null;
+            const marinePromise = (include.has('marine') && bounds)
+              ? getMarinePayload(bounds)
+              : null;
+            const camerasPromise = (include.has('cameras') && bounds)
+              ? getCameraSnapshot(bounds, maxCam)
+              : null;
+
+            const [flightsPayload, satellitesPayload, trafficPayload, marinePayload, camerasPayload] = await Promise.all([
+              flightsPromise,
+              satellitesPromise,
+              trafficPromise,
+              marinePromise,
+              camerasPromise,
+            ]);
+
+            if (flightsPayload) payload.flights = flightsPayload;
+            if (satellitesPayload) payload.satellites = satellitesPayload;
+            if (trafficPayload) payload.traffic = trafficPayload;
+            if (marinePayload) payload.marine = marinePayload;
+            if (camerasPayload) payload.cameras = camerasPayload;
+
+            payload.diagnostics = {
+              providers: {
+                flights: payload.flights?.source ?? null,
+                satellites: payload.satellites?.source ?? null,
+                traffic: payload.traffic?.source ?? null,
+                marine: payload.marine?.source ?? null,
+                cameras: payload.cameras?.source ?? null,
+              },
+              cache: {
+                flights: payload.flights?.cacheHit ?? null,
+                satellites: payload.satellites?.cacheHit ?? null,
+                traffic: payload.traffic?.cacheHit ?? null,
+                marine: payload.marine?.cacheHit ?? null,
+                cameras: payload.cameras?.cacheHit ?? null,
+              },
+            };
+
+            if (!res.headersSent) {
+              res.writeHead(200);
+              res.end(JSON.stringify(payload));
+            }
+            return;
+          } catch (err) {
+            if (!res.headersSent) {
+              res.writeHead(502);
+              res.end(JSON.stringify({ error: err?.message ?? 'world snapshot failed' }));
+            }
+            return;
+          } finally {
+            req.off('aborted', onAborted);
           }
-        } finally {
-          req.off('aborted', onAborted);
+        } catch (err) {
+          if (!res.headersSent) {
+            res.writeHead(502);
+            res.end(JSON.stringify({ error: err?.message ?? 'world snapshot failed' }));
+          }
+          return;
         }
-        return;
-      } catch (err) {
-        if (!res.headersSent) {
-          res.writeHead(502);
-          res.end(JSON.stringify({ error: err?.message ?? 'world snapshot failed' }));
-        }
-        return;
-      }
-    } else if (url === '/health') {
-      ensureTileCacheDir();
-      const tileEntries = fs.readdirSync(TILE_CACHE_DIR).filter(name => name.endsWith('.json')).length;
-      res.writeHead(200);
-      res.end(JSON.stringify({
-        status: 'ok',
-        db: db.size,
-        hubs: ALL_HUBS.length,
-        hub_cache: hubCache.size,
-        cache: {
-          flights: flightSnapshotCache.size,
-          traffic: trafficSnapshotCache.size,
-          marine: marineSnapshotCache.size,
-          sat_points: satSnapshotCache.points?.length ?? 0,
-          camera_tiles: cameraTileCache.size,
-          camera_snapshots: cameraSnapshotCache.size,
         },
         tileCache: {
           dir: TILE_CACHE_DIR,
