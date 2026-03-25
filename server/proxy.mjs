@@ -5674,8 +5674,10 @@ const server = http.createServer(async (req, res) => {
         sentinelHubConfigured: Boolean(SENTINEL_HUB_WMS_URL),
       }));
     } catch (err) {
-      res.writeHead(502);
-      res.end(JSON.stringify({ error: err?.message ?? 'satellite imagery preview failed' }));
+      if (!res.headersSent) {
+        res.writeHead(502);
+        res.end(JSON.stringify({ error: err?.message ?? 'satellite imagery preview failed' }));
+      }
     }
   } else if (url === '/api/satellites/snapshot') {
     const rawMax = parseInt(query.max ?? '0', 10);
