@@ -1417,7 +1417,7 @@ function wireCameraControlButtons(viewer) {
     paintHealthState(satelliteHealthSh, false);
     paintHealthTimestamp(Number.NaN);
     try {
-      const resp = await fetch('/api/localproxy/api/satellite-imagery/health', { cache: 'no-store' });
+      const resp = await fetch('/api/satellite-imagery/health', { cache: 'no-store' });
       const payload = await resp.json().catch(() => ({}));
       if (!resp.ok) throw new Error(payload.error || `health check failed (${resp.status})`);
       paintHealthState(satelliteHealthCds, Boolean(payload.copernicusDataspaceConfigured));
@@ -1770,7 +1770,7 @@ function wireCameraControlButtons(viewer) {
         collection: collectionId,
         bands,
       });
-      const resp = await fetch(`/api/localproxy/api/satellite-imagery/preview?${query.toString()}`, {
+      const resp = await fetch(`/api/satellite-imagery/preview?${query.toString()}`, {
         cache: 'no-store',
       });
       const payload = await resp.json().catch(() => ({}));

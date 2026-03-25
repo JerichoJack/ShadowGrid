@@ -97,7 +97,7 @@ function sourceProtocol(url) {
 /** Route camera streams through local proxy for CORS/auth handling and protocol conversion. */
 function proxiedVideoUrl(url) {
   if (!url) return null;
-  return `/api/localproxy/api/cameras/stream?url=${encodeURIComponent(url)}`;
+  return `/api/cameras/stream?url=${encodeURIComponent(url)}`;
 }
 
 async function getCameraStreamHealth() {
@@ -106,7 +106,7 @@ async function getCameraStreamHealth() {
     return _streamHealthCache.data;
   }
   try {
-    const res = await fetch('/api/localproxy/api/cameras/stream/health', { cache: 'no-store' });
+    const res = await fetch('/api/cameras/stream/health', { cache: 'no-store' });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
     _streamHealthCache = { ts: now, data };
@@ -783,7 +783,7 @@ function renderPanel(cam) {
       getCameraStreamHealth().then((health) => {
         if (!transcodeNote) return;
         if (!health) {
-          transcodeNote.textContent = 'Server transcoder status unavailable. Ensure /api/localproxy/api/cameras/stream/health is reachable.';
+          transcodeNote.textContent = 'Server transcoder status unavailable. Ensure /api/cameras/stream/health is reachable.';
           return;
         }
         if (health.ffmpegAvailable) {
