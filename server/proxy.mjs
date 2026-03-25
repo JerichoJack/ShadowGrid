@@ -4793,6 +4793,192 @@ async function getMarinePayload(bounds) {
   return payload;
 }
 
+// ── Aircraft database ─────────────────────────────────────────────────────────
+/** @type {Map<string, object>} */
+const db = new Map();
+
+function upsert(aircraft) {
+  const now = Date.now();
+  for (const a of aircraft) {
+    const id = (a.hex ?? '').toLowerCase().trim();
+    if (!id || !a.lat || !a.lon) continue;
+    if (a.alt_baro === 'ground' || (a.alt_baro ?? 0) <= 100) continue;
+    enrichAircraftFromDb(a);
+    db.set(id, {
+      hex:        id,
+      flight:     (a.flight ?? a.r ?? '').trim(),
+      lat:        a.lat,
+      lon:        a.lon,
+      alt_baro:   a.alt_baro ?? a.alt_geom ?? 10000,
+      track:      a.track ?? 0,
+      gs:         a.gs ?? 0,
+      // enrichment fields — used for icon shape, color classification, HUD panel
+      t:          a.t        ?? '',       // ICAO type code e.g. "H60", "B738", "A320"
+      category:   a.category ?? '',       // ADS-B category byte e.g. "A7" = rotorcraft
+      dbFlags:    a.dbFlags  ?? 0,        // bit 0 = military
+      squawk:     a.squawk   ?? '',
+      baro_rate:  a.baro_rate ?? a.geom_rate ?? 0,
+      icon:       a.icon ?? '',           // <-- enriched SVG icon shape name
+      iconScale:  typeof a.iconScale === 'number' ? a.iconScale : 1, // <-- enriched SVG icon scale
+      // Optionally include other enrichment fields as needed by client
+      typecode:   a.typecode ?? '',
+      manufacturer: a.manufacturer ?? '',
+      model:      a.model ?? '',
+      wtc:        a.wtc ?? '',
+      typeDescription: a.typeDescription ?? '',
+      engineCount: a.engineCount ?? '',
+      engineType:  a.engineType ?? '',
+      modelFullName: a.modelFullName ?? '',
+      _seen:      now,
+    });
+  }
+}
+
+function pruneStale() {
+  const cutoff = Date.now() - STALE_MS;
+  let n = 0;
+  for (const [id, a] of db) { if (a._seen < cutoff) { db.delete(id); n++; } }
+  if (n) console.log(`[proxy] Pruned ${n} — DB: ${db.size}`);
+}
+
+setInterval(pruneStale, 30_000);
+
+// ── Hub selection — find hubs that overlap the viewport bbox ──────────────────
+
+function hubsForBounds(minLon, minLat, maxLon, maxLat) {
+  // Pad the bbox by one hub radius so we catch aircraft near the edges
+  const pad = RADIUS_DEG * 1.1;
+  const pMinLat = minLat - pad, pMaxLat = maxLat + pad;
+  const pMinLon = minLon - pad, pMaxLon = maxLon + pad;
+  const wraps = pMaxLon - pMinLon >= 360; // full globe visible
+
+  return ALL_HUBS.filter(h => {
+    if (h.lat < pMinLat || h.lat > pMaxLat) return false;
+    if (wraps) return true;
+    if (pMinLon < -180 || pMaxLon > 180) {
+      // bbox wraps antimeridian
+      return h.lon >= pMinLon + 360 || h.lon <= pMaxLon - 360 ||
+             (h.lon >= pMinLon && h.lon <= pMaxLon);
+    }
+    return h.lon >= pMinLon && h.lon <= pMaxLon;
+  });
+}
+
+// ── Hub fetcher with per-hub TTL cache ────────────────────────────────────────
+
+async function fetchHub(hub) {
+  const key = hubKey(hub);
+  const cached = hubCache.get(key);
+
+  // Return cached promise if hub was recently fetched
+  if (cached) {
+    if (cached.promise) return cached.promise; // in-flight
+    if (Date.now() - cached.time < HUB_TTL) return; // fresh, skip
+  }
+
+  const promise = (async () => {
+    try {
+      const url = `https://opendata.adsb.fi/api/v3/lat/${hub.lat}/lon/${hub.lon}/dist/${RADIUS_NM}`;
+      const res = await fetch(url, { headers: HEADERS, signal: AbortSignal.timeout(8_000) });
+      if (!res.ok) throw new Error(`${res.status}`);
+      const d = await res.json();
+      upsert(d.aircraft ?? d.ac ?? []);
+    } catch (err) {
+      // Silently ignore individual hub failures
+    } finally {
+      hubCache.set(key, { time: Date.now(), promise: null });
+    }
+  })();
+
+  hubCache.set(key, { time: Date.now(), promise });
+  return promise;
+}
+
+// ── Request handler ───────────────────────────────────────────────────────────
+
+async function getFlightsPayload(query = {}) {
+  let hubs = [];
+  let flightSource = BACKEND_FLIGHT_PROVIDER;
+  const requestHeavy = query.mode === 'heavy' || SERVER_HEAVY_MODE;
+  const viewportBufferDeg = requestHeavy ? 3 : 1;
+  const parts = (query.bounds ?? '').split(',').map(Number);
+  const bounds = (parts.length === 4 && parts.every(n => Number.isFinite(n))) ? normalizeBounds(parts) : null;
+  const cacheKey = `${requestHeavy ? 'heavy' : 'normal'}:${boundsCacheKey(bounds)}:${BACKEND_FLIGHT_PROVIDER}`;
+  const cached = flightSnapshotCache.get(cacheKey);
+  if (cached && (Date.now() - cached.ts) < FLIGHT_SNAPSHOT_TTL_MS) {
+    return { ...cached.payload, cacheHit: true };
+  }
+
+  // Use configured backend provider where available; keep proxy hub mode as fallback.
+  let shouldUseHubGridFallback = BACKEND_FLIGHT_PROVIDER === 'proxy';
+
+  if (BACKEND_FLIGHT_PROVIDER === 'airplaneslive' || BACKEND_FLIGHT_PROVIDER === 'adsbool') {
+    try {
+      const base = BACKEND_FLIGHT_PROVIDER === 'airplaneslive'
+        ? 'https://api.airplanes.live'
+        : 'https://api.adsb.lol';
+      // In server-heavy mode use /v2/all for global coverage (no viewport limit)
+      await fetchReadsbProvider(base, bounds, requestHeavy);
+    } catch (err) {
+      console.warn(`[proxy] ${BACKEND_FLIGHT_PROVIDER} backend fetch failed, falling back to hub grid: ${err?.message ?? 'unknown'}`);
+      shouldUseHubGridFallback = true;
+      flightSource = `${BACKEND_FLIGHT_PROVIDER}:fallback-hub-grid`;
+    }
+  }
+
+  if (BACKEND_FLIGHT_PROVIDER === 'opensky') {
+    try {
+      await fetchOpenSkyProvider();
+    } catch (err) {
+      console.warn(`[proxy] OpenSky backend fetch failed, falling back to hub grid: ${err?.message ?? 'unknown'}`);
+      shouldUseHubGridFallback = true;
+      flightSource = 'opensky:fallback-hub-grid';
+    }
+  }
+
+  if (shouldUseHubGridFallback) {
+    // In heavy mode fetch ALL hubs globally; otherwise only viewport hubs
+    if (requestHeavy) {
+      hubs = ALL_HUBS;
+    } else if (bounds) {
+      const [minLon, minLat, maxLon, maxLat] = bounds;
+      hubs = hubsForBounds(minLon, minLat, maxLon, maxLat);
+    }
+
+    const batches = [];
+    for (let i = 0; i < hubs.length; i += MAX_CONC) {
+      batches.push(hubs.slice(i, i + MAX_CONC));
+    }
+    for (const batch of batches) {
+      await Promise.allSettled(batch.map(h => fetchHub(h)));
+    }
+  }
+
+  // In server-heavy mode return the entire DB (global mode); otherwise filter to bbox
+  let aircraft = [...db.values()].map(({ _seen, ...rest }) => rest);
+
+  if (!requestHeavy && bounds) {
+    const [minLon, minLat, maxLon, maxLat] = bounds;
+    aircraft = aircraft.filter(a =>
+      a.lat >= minLat - viewportBufferDeg && a.lat <= maxLat + viewportBufferDeg &&
+      a.lon >= minLon - viewportBufferDeg && a.lon <= maxLon + viewportBufferDeg
+    );
+  }
+
+  console.log(`[proxy] flights=${flightSource} ${hubs.length} hubs queried → ${aircraft.length} aircraft in viewport${requestHeavy ? ' (heavy)' : ''}`);
+
+  const payload = { aircraft, total: aircraft.length, ts: Date.now(), source: flightSource, cacheKey, cacheHit: false };
+  flightSnapshotCache.set(cacheKey, { ts: Date.now(), payload });
+  scheduleCacheWrite();
+  return payload;
+}
+
+async function handleFlights(query, res) {
+  const payload = await getFlightsPayload(query);
+  res.writeHead(200);
+  res.end(JSON.stringify(payload));
+}
+
 // ── HTTP server ───────────────────────────────────────────────────────────────
 
 const getAircraftDebugLogPath = () => {
@@ -4802,25 +4988,25 @@ const getAircraftDebugLogPath = () => {
 };
 
 const server = http.createServer(async (req, res) => {
-  // Aircraft Debug Log Endpoint
-  if (req.method === 'POST' && req.url === '/api/logs/aircraft-debug') {
-    let body = '';
-    req.on('data', chunk => { body += chunk; });
-    req.on('end', () => {
-      try {
-        const entry = JSON.parse(body);
-        entry.receivedAt = new Date().toISOString();
-        const aircraftDebugLogPath = getAircraftDebugLogPath();
-        fs.appendFileSync(aircraftDebugLogPath, JSON.stringify(entry) + '\n');
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ ok: true }));
-      } catch (err) {
-        res.writeHead(500, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ ok: false, error: err.message }));
-      }
-    });
-    return;
-  }
+    // Aircraft Debug Log Endpoint
+    if (req.method === 'POST' && req.url === '/api/logs/aircraft-debug') {
+      let body = '';
+      req.on('data', chunk => { body += chunk; });
+      req.on('end', () => {
+        try {
+          const entry = JSON.parse(body);
+          entry.receivedAt = new Date().toISOString();
+          const aircraftDebugLogPath = getAircraftDebugLogPath();
+          fs.appendFileSync(aircraftDebugLogPath, JSON.stringify(entry) + '\n');
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: true }));
+        } catch (err) {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: false, error: err.message }));
+        }
+      });
+      return;
+    }
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept');
@@ -4897,7 +5083,6 @@ const server = http.createServer(async (req, res) => {
     if (url === '/api/flights') {
       res.setHeader('Content-Type', 'application/json');
       await handleFlights(query, res);
-      return;
     } else if (url === '/api/cameras/stream/health') {
       try {
         res.setHeader('Content-Type', 'application/json');
@@ -4906,7 +5091,6 @@ const server = http.createServer(async (req, res) => {
         res.writeHead(502, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: err?.message ?? 'camera stream health failed' }));
       }
-      return;
     } else if (url === '/api/cameras/stream') {
       try {
         res.setHeader('Content-Type', 'application/json');
@@ -4915,7 +5099,6 @@ const server = http.createServer(async (req, res) => {
         res.writeHead(502, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: err?.message ?? 'camera stream proxy failed' }));
       }
-      return;
     } else if (url.startsWith('/api/cameras/hls/')) {
       try {
         res.setHeader('Content-Type', 'application/json');
@@ -4924,11 +5107,11 @@ const server = http.createServer(async (req, res) => {
         res.writeHead(502, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: err?.message ?? 'camera hls segment failed' }));
       }
-      return;
     } else if (url === '/api/nofly_gps') {
       try {
         res.setHeader('Content-Type', 'application/json');
-        const bounds = parseBounds(query);
+        const parts = (query.bounds ?? '').split(',').map(Number);
+        const bounds = (parts.length === 4 && parts.every(n => Number.isFinite(n))) ? parts : null;
         const payload = await getOverlayPayload(bounds);
         res.writeHead(200);
         res.end(JSON.stringify({
@@ -4942,10 +5125,10 @@ const server = http.createServer(async (req, res) => {
         res.writeHead(502, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: err?.message ?? 'nofly_gps request failed' }));
       }
-      return;
     } else if (url === '/api/internet') {
       try {
-        const bounds = parseBounds(query);
+        const parts = (query.bounds ?? '').split(',').map(Number);
+        const bounds = (parts.length === 4 && parts.every(n => Number.isFinite(n))) ? parts : null;
         const payload = await getOverlayPayload(bounds);
         if (!res.headersSent) {
           res.writeHead(200);
@@ -4966,8 +5149,8 @@ const server = http.createServer(async (req, res) => {
         return;
       }
     } else if (url === '/api/traffic/google') {
-      const parts = parseBounds(query);
-      if (!parts) {
+      const parts = (query.bounds ?? '').split(',').map(Number);
+      if (parts.length !== 4 || parts.some(n => !Number.isFinite(n))) {
         res.writeHead(400);
         res.end(JSON.stringify({ error: 'bounds must be minLon,minLat,maxLon,maxLat' }));
         return;
@@ -4982,8 +5165,8 @@ const server = http.createServer(async (req, res) => {
         return;
       }
     } else if (url === '/api/marine/snapshot') {
-      const parts = parseBounds(query);
-      if (!parts) {
+      const parts = (query.bounds ?? '').split(',').map(Number);
+      if (parts.length !== 4 || parts.some(n => !Number.isFinite(n))) {
         res.writeHead(400);
         res.end(JSON.stringify({ error: 'bounds must be minLon,minLat,maxLon,maxLat' }));
         return;
@@ -5005,7 +5188,6 @@ const server = http.createServer(async (req, res) => {
         copernicusDataspaceConfigured: Boolean(COPERNICUS_DATASPACE_WMS_URL),
         sentinelHubConfigured: Boolean(SENTINEL_HUB_WMS_URL),
       }));
-      return;
     } else if (url === '/api/satellites/snapshot') {
       const rawMax = parseInt(query.max ?? '0', 10);
       const maxCount = rawMax > 0 ? rawMax : Infinity;
@@ -5023,8 +5205,8 @@ const server = http.createServer(async (req, res) => {
         res.end(JSON.stringify({ error: err?.message ?? 'satellite snapshot failed' }));
       }
     } else if (url === '/api/cameras/snapshot') {
-      const parts = parseBounds(query);
-      if (!parts) {
+      const parts = (query.bounds ?? '').split(',').map(Number);
+      if (parts.length !== 4 || parts.some(n => !Number.isFinite(n))) {
         res.writeHead(400);
         res.end(JSON.stringify({ error: 'bounds must be minLon,minLat,maxLon,maxLat' }));
         return;
@@ -5040,8 +5222,8 @@ const server = http.createServer(async (req, res) => {
         return;
       }
     } else if (url === '/api/world/snapshot') {
-      const parts = parseBounds(query);
-      const bounds = parts ? parts : null;
+      const parts = (query.bounds ?? '').split(',').map(Number);
+      const bounds = (parts.length === 4 && parts.every(n => Number.isFinite(n))) ? parts : null;
       const include = new Set((query.include ?? 'flights,satellites,traffic,marine,cameras').split(',').map(s => s.trim().toLowerCase()).filter(Boolean));
       const maxSat = Math.max(parseInt(query.satMax ?? '0', 10) || 0, 0) || Infinity;
       const satPerCategory = Math.max(parseInt(query.satPerCategory ?? `${SATELLITE_MAX_PER_CATEGORY}`, 10) || SATELLITE_MAX_PER_CATEGORY, 1);
@@ -5146,7 +5328,6 @@ const server = http.createServer(async (req, res) => {
           ttlMs: TILE_CACHE_TTL_MS,
         },
       }));
-      return;
     } else {
       res.writeHead(404, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: 'Not found' }));
@@ -5169,7 +5350,6 @@ const server = http.createServer(async (req, res) => {
 
   if (url === '/api/flights') {
     await handleFlights(query, res);
-    return;
   } else if (url === '/api/cameras/stream/health') {
     try {
       await handleCameraStreamHealth(res);
@@ -5179,7 +5359,6 @@ const server = http.createServer(async (req, res) => {
         res.end(JSON.stringify({ error: err?.message ?? 'camera stream health failed' }));
       }
     }
-    return;
   } else if (url === '/api/cameras/stream') {
     try {
       await handleCameraStreamProxy(queryParams, res);
@@ -5189,7 +5368,6 @@ const server = http.createServer(async (req, res) => {
         res.end(JSON.stringify({ error: err?.message ?? 'camera stream proxy failed' }));
       }
     }
-    return;
   } else if (url.startsWith('/api/cameras/hls/')) {
     try {
       await handleCameraHlsSegment(url, res);
@@ -5199,7 +5377,6 @@ const server = http.createServer(async (req, res) => {
         res.end(JSON.stringify({ error: err?.message ?? 'camera hls segment failed' }));
       }
     }
-    return;
   } else if (url === '/api/nofly_gps') {
     try {
       const parts = (query.bounds ?? '').split(',').map(Number);
@@ -5219,7 +5396,6 @@ const server = http.createServer(async (req, res) => {
         res.end(JSON.stringify({ error: err?.message ?? 'nofly_gps request failed' }));
       }
     }
-    return;
   } else if (url === '/api/internet') {
     try {
       const parts = (query.bounds ?? '').split(',').map(Number);
@@ -5244,8 +5420,8 @@ const server = http.createServer(async (req, res) => {
       return;
     }
   } else if (url === '/api/traffic/google') {
-    const parts = parseBounds(query);
-    if (!parts) {
+    const parts = (query.bounds ?? '').split(',').map(Number);
+    if (parts.length !== 4 || parts.some(n => !Number.isFinite(n))) {
       res.writeHead(400);
       res.end(JSON.stringify({ error: 'bounds must be minLon,minLat,maxLon,maxLat' }));
       return;
@@ -5262,8 +5438,8 @@ const server = http.createServer(async (req, res) => {
       return;
     }
   } else if (url === '/api/marine/snapshot') {
-    const parts = parseBounds(query);
-    if (!parts) {
+    const parts = (query.bounds ?? '').split(',').map(Number);
+    if (parts.length !== 4 || parts.some(n => !Number.isFinite(n))) {
       res.writeHead(400);
       res.end(JSON.stringify({ error: 'bounds must be minLon,minLat,maxLon,maxLat' }));
       return;
@@ -5287,7 +5463,6 @@ const server = http.createServer(async (req, res) => {
       copernicusDataspaceConfigured: Boolean(COPERNICUS_DATASPACE_WMS_URL),
       sentinelHubConfigured: Boolean(SENTINEL_HUB_WMS_URL),
     }));
-    return;
   } else if (url === '/api/satellite-imagery/preview') {
     const lat = Number(query.lat);
     const lon = Number(query.lon);
@@ -5353,8 +5528,8 @@ const server = http.createServer(async (req, res) => {
       }
     }
   } else if (url === '/api/cameras/snapshot') {
-    const parts = parseBounds(query);
-    if (!parts) {
+    const parts = (query.bounds ?? '').split(',').map(Number);
+    if (parts.length !== 4 || parts.some(n => !Number.isFinite(n))) {
       res.writeHead(400);
       res.end(JSON.stringify({ error: 'bounds must be minLon,minLat,maxLon,maxLat' }));
       return;
@@ -5370,8 +5545,8 @@ const server = http.createServer(async (req, res) => {
       return;
     }
   } else if (url === '/api/world/snapshot') {
-    const parts = parseBounds(query);
-    const bounds = parts ? parts : null;
+    const parts = (query.bounds ?? '').split(',').map(Number);
+    const bounds = (parts.length === 4 && parts.every(n => Number.isFinite(n))) ? parts : null;
     const include = new Set((query.include ?? 'flights,satellites,traffic,marine,cameras').split(',').map(s => s.trim().toLowerCase()).filter(Boolean));
     const maxSat = Math.max(parseInt(query.satMax ?? '0', 10) || 0, 0) || Infinity;
     const satPerCategory = Math.max(parseInt(query.satPerCategory ?? `${SATELLITE_MAX_PER_CATEGORY}`, 10) || SATELLITE_MAX_PER_CATEGORY, 1);
@@ -5470,7 +5645,6 @@ const server = http.createServer(async (req, res) => {
         },
       }));
     }
-    return;
   } else {
     if (!res.headersSent) {
       res.writeHead(404);
