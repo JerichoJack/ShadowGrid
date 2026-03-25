@@ -709,7 +709,9 @@ async function waitForPlaylist(playlistPath, timeoutMs = CAMERA_STREAM_BOOT_TIME
 async function handleCameraStreamProxy(queryParams, res) {
   const sourceUrl = queryParams.get('url') || '';
   if (!sourceUrl) {
+    if (res.headersSent) return;
     res.writeHead(400, { 'Content-Type': 'application/json' });
+    if (res.headersSent) return;
     res.end(JSON.stringify({ error: 'missing url query param' }));
     return;
   }
@@ -718,7 +720,9 @@ async function handleCameraStreamProxy(queryParams, res) {
   try {
     parsed = new URL(sourceUrl);
   } catch {
+    if (res.headersSent) return;
     res.writeHead(400, { 'Content-Type': 'application/json' });
+    if (res.headersSent) return;
     res.end(JSON.stringify({ error: 'invalid source url' }));
     return;
   }
@@ -733,7 +737,9 @@ async function handleCameraStreamProxy(queryParams, res) {
     });
 
     if (!upstream.ok) {
+      if (res.headersSent) return;
       res.writeHead(upstream.status, { 'Content-Type': 'application/json' });
+      if (res.headersSent) return;
       res.end(JSON.stringify({ error: `upstream ${upstream.status}` }));
       return;
     }
@@ -743,10 +749,12 @@ async function handleCameraStreamProxy(queryParams, res) {
     if (isM3u8) {
       const text = await upstream.text();
       const rewritten = rewriteM3u8Playlist(text, sourceUrl);
+      if (res.headersSent) return;
       res.writeHead(200, {
         'Content-Type': 'application/vnd.apple.mpegurl',
         'Cache-Control': 'no-store, max-age=0',
       });
+      if (res.headersSent) return;
       res.end(rewritten);
       return;
     }
@@ -756,6 +764,7 @@ async function handleCameraStreamProxy(queryParams, res) {
       'Content-Type': contentType || guessMimeByName(parsed.pathname),
       'Cache-Control': 'no-store, max-age=0',
     });
+    if (res.headersSent) return;
     res.end(body);
     return;
   }
@@ -763,7 +772,9 @@ async function handleCameraStreamProxy(queryParams, res) {
   if (protocol === 'rtmp' || protocol === 'rtsp' || protocol === 'mms') {
     const hasFfmpeg = await ensureFfmpegAvailable();
     if (!hasFfmpeg) {
+      if (res.headersSent) return;
       res.writeHead(501, { 'Content-Type': 'application/json' });
+      if (res.headersSent) return;
       res.end(JSON.stringify({ error: 'ffmpeg not available on server for RTMP/RTSP conversion' }));
       return;
     }
@@ -772,7 +783,9 @@ async function handleCameraStreamProxy(queryParams, res) {
     session.lastAccess = Date.now();
     const ready = await waitForPlaylist(session.playlistPath);
     if (!ready) {
+      if (res.headersSent) return;
       res.writeHead(503, { 'Content-Type': 'application/json' });
+      if (res.headersSent) return;
       res.end(JSON.stringify({ error: 'transcoder warming up' }));
       return;
     }
@@ -791,18 +804,22 @@ async function handleCameraStreamProxy(queryParams, res) {
       'Content-Type': 'application/vnd.apple.mpegurl',
       'Cache-Control': 'no-store, max-age=0',
     });
+    if (res.headersSent) return;
     res.end(rewritten);
     return;
   }
 
   res.writeHead(400, { 'Content-Type': 'application/json' });
+  if (res.headersSent) return;
   res.end(JSON.stringify({ error: `unsupported protocol: ${protocol}` }));
 }
 
 async function handleCameraHlsSegment(urlPath, res) {
   const m = urlPath.match(/^\/api\/cameras\/hls\/([^/]+)\/(.+)$/);
   if (!m) {
+    if (res.headersSent) return;
     res.writeHead(404, { 'Content-Type': 'application/json' });
+    if (res.headersSent) return;
     res.end(JSON.stringify({ error: 'not found' }));
     return;
   }
@@ -810,7 +827,9 @@ async function handleCameraHlsSegment(urlPath, res) {
   const [, sessionId, encodedFile] = m;
   const session = cameraStreamSessions.get(sessionId);
   if (!session) {
+    if (res.headersSent) return;
     res.writeHead(404, { 'Content-Type': 'application/json' });
+    if (res.headersSent) return;
     res.end(JSON.stringify({ error: 'stream session expired' }));
     return;
   }
@@ -818,23 +837,29 @@ async function handleCameraHlsSegment(urlPath, res) {
 
   const fileName = decodeURIComponent(encodedFile || '');
   if (!fileName || fileName.includes('..') || fileName.includes('/') || fileName.includes('\\')) {
+    if (res.headersSent) return;
     res.writeHead(400, { 'Content-Type': 'application/json' });
+    if (res.headersSent) return;
     res.end(JSON.stringify({ error: 'invalid segment path' }));
     return;
   }
 
   const filePath = path.join(session.dir, fileName);
   if (!fs.existsSync(filePath)) {
+    if (res.headersSent) return;
     res.writeHead(404, { 'Content-Type': 'application/json' });
+    if (res.headersSent) return;
     res.end(JSON.stringify({ error: 'segment not found' }));
     return;
   }
 
   const body = fs.readFileSync(filePath);
+  if (res.headersSent) return;
   res.writeHead(200, {
     'Content-Type': guessMimeByName(fileName),
     'Cache-Control': 'no-store, max-age=0',
   });
+  if (res.headersSent) return;
   res.end(body);
 }
 
