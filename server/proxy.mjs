@@ -25,6 +25,8 @@ import { spawn } from 'child_process';
 import * as satellite from 'satellite.js';
 import { cellToBoundary } from 'h3-js';
 import { feature as topojsonFeature } from 'topojson-client';
+import { upsertAircraftRecord } from './collectors/upsertAircraftRecord.js';
+import { parse as csvParse } from 'csv-parse/sync';
 
 const PORT = 3001;
 const RADIUS_NM = 250;
