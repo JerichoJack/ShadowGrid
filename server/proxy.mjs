@@ -992,7 +992,7 @@ async function handleCameraStreamProxy(queryParams, res) {
       .map((line) => {
         const t = line.trim();
         if (!t || t.startsWith('#')) return line;
-        return `/api/cameras/hls/${session.id}/${encodeURIComponent(t)}`;
+        return `/api/localproxy/api/cameras/hls/${session.id}/${encodeURIComponent(t)}`;
       })
       .join('\n');
 
