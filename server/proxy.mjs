@@ -821,7 +821,7 @@ function rewriteM3u8Playlist(playlistText, sourceUrl) {
       if (!t || t.startsWith('#')) return line;
       try {
         const absolute = new URL(t, sourceUrl).toString();
-        return `/api/cameras/stream?url=${encodeURIComponent(absolute)}`;
+        return `/api/localproxy/api/cameras/stream?url=${encodeURIComponent(absolute)}`;
       } catch {
         return line;
       }
