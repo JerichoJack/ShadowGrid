@@ -4947,6 +4947,7 @@ async function getMarinePayload(bounds) {
     }
   // Fetch vessels from aisstream.io WebSocket API
   async function fetchAisstreamVessels(bounds) {
+    console.log('[aisstream] Connecting to aisstream.io...');
     if (!AISSTREAM_API_KEY) throw new Error('AISStream API key missing');
     // bounds: [minLon, minLat, maxLon, maxLat]
     const [minLon, minLat, maxLon, maxLat] = bounds;
@@ -4961,6 +4962,7 @@ async function getMarinePayload(bounds) {
     });
 
     ws.on('open', () => {
+      console.log('[aisstream] WebSocket opened. Sending subscription...');
       // Subscribe to all vessel positions (filter by bounds client-side)
       ws.send(JSON.stringify({ "APIKey": AISSTREAM_API_KEY, "BoundingBoxes": [[minLon, minLat, maxLon, maxLat]], "FilterMessageTypes": ["PositionReport"] }));
       // Set a timeout to close after 2 seconds (rate limit: 1 req/sec)
@@ -4969,6 +4971,7 @@ async function getMarinePayload(bounds) {
 
     ws.on('message', (data) => {
       try {
+        console.log('[aisstream] Message received:', data.toString());
         const msg = JSON.parse(data);
         if (msg && msg.MessageType === 'PositionReport' && msg.Message) {
           const m = msg.Message;
@@ -4992,15 +4995,19 @@ async function getMarinePayload(bounds) {
             });
           }
         }
-      } catch {}
+      } catch (err) {
+        console.warn('[aisstream] Failed to parse message:', err);
+      }
     });
 
     ws.on('close', () => {
       clearTimeout(timeout);
+      console.log('[aisstream] WebSocket closed. Vessels collected:', vessels.size);
       resolve(Array.from(vessels.values()));
     });
     ws.on('error', (err) => {
       clearTimeout(timeout);
+      console.error('[aisstream] WebSocket error:', err);
       reject(err);
     });
 
