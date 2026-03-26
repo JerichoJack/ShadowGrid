@@ -19,65 +19,43 @@ const VESSEL_COLOR_FISHING = new Cesium.Color(1.0, 0.8, 0.0, 0.8); // Yellow for
 
 const VESSEL_COLOR_OTHER = new Cesium.Color(0.6, 0.6, 0.8, 0.8); // Light purple for other
 
-// --- SVG icon logic for ship types ---
 const SHIP_SVG_SHAPES = {
   cargo: {
-    path: 'M4 28 L28 28 L24 20 L8 20 Z', // simple hull
-    accent: 'M8 20 L24 20',
+    // flat hull + stacked containers
+    path: 'M3 24 L29 24 L25 28 L7 28 Z M6 18 H12 V24 H6 Z M13 18 H19 V24 H13 Z M20 18 H26 V24 H20 Z',
+    accent: 'M3 24 H29',
     viewBox: '0 0 32 32',
   },
+
   tanker: {
-    path: 'M6 28 Q16 18 26 28 Z', // rounded hull
-    accent: 'M10 24 Q16 20 22 24',
+    // long rounded hull + central tank dome
+    path: 'M4 25 Q16 20 28 25 L24 28 H8 Z M12 17 Q16 14 20 17 Q16 19 12 17 Z',
+    accent: 'M6 25 Q16 22 26 25',
     viewBox: '0 0 32 32',
   },
+
   passenger: {
-    path: 'M4 28 L28 28 L20 16 L12 16 Z', // cruise/ferry
-    accent: 'M12 16 L20 16',
+    // cruise ship: tiered decks + bridge
+    path: 'M3 26 L29 26 L24 28 L8 28 Z M8 18 H24 V22 H8 Z M10 14 H22 V18 H10 Z',
+    accent: 'M10 20 H22',
     viewBox: '0 0 32 32',
   },
+
   fishing: {
-    path: 'M8 28 L24 28 L16 18 Z', // trawler
-    accent: 'M16 18 L16 24',
+    // small boat + mast
+    path: 'M6 26 L26 26 L20 28 L12 28 Z M15 14 L17 14 L17 24 L15 24 Z M16 14 L22 20 L16 20 Z',
+    accent: 'M16 24 L16 28',
     viewBox: '0 0 32 32',
   },
+
   other: {
-    path: 'M10 28 L22 28 L16 22 Z', // generic
+    // generic but still "boat-like"
+    path: 'M6 26 L26 26 L21 28 L11 28 Z M12 20 H20 V24 H12 Z',
     accent: '',
     viewBox: '0 0 32 32',
   },
 };
 
-// --- Click-to-info logic for vessels ---
-function showVesselInfo(entity) {
-  if (!entity || !entity.properties) return;
-  const props = entity.properties;
-  const name = entity.label?.text?.getValue() || 'Vessel';
-  const type = props.type?.getValue() || 'Unknown';
-  const shipType = props.shipType?.getValue() || '';
-  const speed = props.speed?.getValue() || 'N/A';
-  const heading = props.heading?.getValue() || 'N/A';
-  const source = props.source?.getValue() || 'live';
-  const html = `
-    <b>${name}</b><br/>
-    <b>Type:</b> ${type} ${shipType ? '(' + shipType + ')' : ''}<br/>
-    <b>Speed:</b> ${speed} kn<br/>
-    <b>Heading:</b> ${heading}&deg;<br/>
-    <b>Source:</b> ${source}
-  `;
-  // Use Cesium's InfoBox or fallback to alert
-  if (viewer && viewer.selectedEntity !== entity) {
-    viewer.selectedEntity = entity;
-    if (viewer.infoBox) {
-      viewer.infoBox.viewModel.showInfo = true;
-      viewer.infoBox.viewModel.titleText = name;
-      viewer.infoBox.viewModel.description = html;
-    }
-  } else {
-    // fallback
-    window.alert(html.replace(/<[^>]+>/g, ''));
-  }
-}
 
 function buildShipSvgUri(type, color) {
   const shape = SHIP_SVG_SHAPES[type] || SHIP_SVG_SHAPES.other;
@@ -306,17 +284,8 @@ function setEntityVisibility(show) {
 export async function initMarineTraffic(viewer_) {
   viewer = viewer_;
 
-  // Add click handler for vessel info
-  if (viewer && !viewer._marineTrafficClickHandler) {
-    const handler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
-    handler.setInputAction(function (movement) {
-      const picked = viewer.scene.pick(movement.position);
-      if (picked && picked.id && picked.id.id && String(picked.id.id).startsWith('marine-point-')) {
-        showVesselInfo(picked.id);
-      }
-    }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
-    viewer._marineTrafficClickHandler = handler;
-  }
+
+  // No custom click handler: HUD entity picker will handle vessel clicks
 
   if (SERVER_HEAVY_MODE) {
     subscribeServerSnapshot('marine', {

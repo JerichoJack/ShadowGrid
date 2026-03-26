@@ -2173,7 +2173,56 @@ function initEntityPicker(viewer) {
 
     const type = primaryType;
 
+    if (type === 'vessel') {
+      clearSatelliteSelection();
+      // Extract vessel info from properties
+      const name     = props.name?.getValue() || entity.label?.text?.getValue() || entity.id || 'Vessel';
+      const vesselType = props.type?.getValue() || 'Unknown';
+      const shipType = props.shipType?.getValue() || '';
+      const speed    = props.speed?.getValue() || 'N/A';
+      const heading  = props.heading?.getValue() || 'N/A';
+      const source   = props.source?.getValue() || 'live';
+      const id       = entity.id || name;
+      panel.style.display = 'block';
+      renderVesselPanel(panel, { id, name, vesselType, shipType, speed, heading, source }, viewer, entity);
+      return;
+    }
+
     if (type === 'flight') {
+      // --- Vessel info panel renderer ---
+      function renderVesselPanel(panel, data, viewer, entity) {
+        const { id, name, vesselType, shipType, speed, heading, source } = data;
+        const icon = '🚢';
+        panel.innerHTML = `
+          <div style="background:rgba(0,0,0,0.3);padding:12px 16px;border-bottom:1px solid #2196f344;border-left:3px solid #2196f3">
+            <div style="display:flex;align-items:center;gap:10px">
+              <span style="font-size:20px;color:#2196f3">${icon}</span>
+              <div>
+                <div style="font-size:15px;font-weight:bold;letter-spacing:0.12em;color:#fff">
+                  <span title="Vessel Name">${name}</span>
+                </div>
+                <div style="opacity:0.55;font-size:10px;margin-top:1px">
+                  <span title="Vessel ID">ID: ${id}</span>
+                </div>
+              </div>
+              <div style="display:flex;align-items:center;gap:8px;margin-left:auto">
+                <span style="font-size:9px;font-weight:bold;color:#2196f3;border:1px solid #2196f355;padding:2px 6px;border-radius:3px;letter-spacing:0.1em">VESSEL</span>
+                <span style="cursor:pointer;opacity:0.5;font-size:14px" id="panel-close">✕</span>
+              </div>
+            </div>
+          </div>
+
+          <div style="padding:10px 16px">
+            <table style="width:100%;border-collapse:collapse;font-size:11px">
+              <tr><td style="opacity:0.5;padding-right:12px;white-space:nowrap">Type</td><td style="font-weight:500">${vesselType}${shipType ? ' (' + shipType + ')' : ''}</td></tr>
+              <tr><td style="opacity:0.5;padding-right:12px;white-space:nowrap">Speed</td><td style="font-weight:500">${speed} kn</td></tr>
+              <tr><td style="opacity:0.5;padding-right:12px;white-space:nowrap">Heading</td><td style="font-weight:500">${heading}&deg;</td></tr>
+              <tr><td style="opacity:0.5;padding-right:12px;white-space:nowrap">Source</td><td style="font-weight:500">${source}</td></tr>
+            </table>
+          </div>
+        `;
+        wirePanelClose(panel);
+      }
       clearSatelliteSelection();
       const icao     = (props.icao?.getValue() ?? String(entity.id).replace('flight-','')).toUpperCase();
       const rawCallsign = (props.callsign?.getValue() ?? '').trim();
