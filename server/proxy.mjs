@@ -40,6 +40,7 @@ const MAX_CONC = SERVER_HEAVY_MODE ? 24 : 12;           // max concurrent hub fe
 
 const HEADERS = { 'User-Agent': 'ShadowGrid/0.1 (github.com/JerichoJack/ShadowGrid)' };
 
+// Loads environment variables from .env file (general utility)
 function loadDotEnvVars() {
   const envPath = path.resolve(process.cwd(), '.env');
   if (!fs.existsSync(envPath)) return new Map();
@@ -166,37 +167,44 @@ const overlaySnapshotCache = new Map();
 
 let cacheWriteTimer = null;
 
+// Ensures the main cache directory exists (general utility)
 function ensureCacheDir() {
   if (!fs.existsSync(CACHE_DIR)) {
     fs.mkdirSync(CACHE_DIR, { recursive: true });
   }
 }
 
+// Ensures the tile cache directory exists (tile caching)
 function ensureTileCacheDir() {
   if (!fs.existsSync(TILE_CACHE_DIR)) {
     fs.mkdirSync(TILE_CACHE_DIR, { recursive: true });
   }
 }
 
+// Ensures the camera stream cache directory exists (CCTV/camera streaming)
 function ensureCameraStreamDir() {
   if (!fs.existsSync(CAMERA_STREAM_DIR)) {
     fs.mkdirSync(CAMERA_STREAM_DIR, { recursive: true });
   }
 }
 
+// Parses bounding box from query (used for viewport-aware APIs)
 function parseBounds(query) {
   const parts = (query.bounds ?? '').split(',').map(Number);
   return (parts.length === 4 && parts.every(n => Number.isFinite(n))) ? parts : null;
 }
 
+// Async sleep utility (general)
 function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+// Clamps a value between min and max (general utility)
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
 
+// Normalizes a date string to ISO format (satellite imagery, general)
 function normalizeIsoDate(value) {
   const fallback = new Date().toISOString().slice(0, 10);
   if (!value) return fallback;
@@ -205,6 +213,7 @@ function normalizeIsoDate(value) {
   return parsed.toISOString().slice(0, 10);
 }
 
+// Cleans up satellite band expressions (satellite imagery)
 function canonicalizeBandExpression(value) {
   return String(value ?? '')
     .split(',')
@@ -251,6 +260,7 @@ const SATELLITE_COLLECTION_BAND_ALLOWLIST = new Map([
   ['NASA/ASTER_GED/AG100_003', new Set(['elevation', 'emissivity_mean', 'temperature'])],
 ]);
 
+// Returns setup instructions for Sentinel Hub credentials (satellite imagery)
 function getSatelliteCredentialSetupHint() {
   return [
     'Set SENTINEL_HUB_INSTANCE_ID in server .env (or environment).',
@@ -259,6 +269,7 @@ function getSatelliteCredentialSetupHint() {
   ].join(' ');
 }
 
+// Returns setup instructions for Copernicus DataSpace credentials (satellite imagery)
 function getCopernicusDataspaceSetupHint() {
   return [
     'Set COPERNICUS_DATASPACE_INSTANCE_ID in server .env (or environment).',
@@ -267,6 +278,7 @@ function getCopernicusDataspaceSetupHint() {
   ].join(' ');
 }
 
+// Determines backend policy for a satellite imagery collection (satellite imagery)
 function getCollectionBackendPolicy(collectionId) {
   const id = String(collectionId || '').trim().toUpperCase();
 
@@ -359,6 +371,7 @@ function getCollectionBackendPolicy(collectionId) {
   };
 }
 
+// Validates a satellite imagery request (satellite imagery)
 function validateSatelliteImageryRequest({ lat, lon, date, source, collectionId, bands }) {
   const safeSource = String(source ?? 'auto').trim().toLowerCase();
   if (!SATELLITE_ALLOWED_SOURCES.has(safeSource)) {
@@ -443,6 +456,7 @@ function validateSatelliteImageryRequest({ lat, lon, date, source, collectionId,
   };
 }
 
+// Computes bounding rectangle for satellite imagery (satellite imagery)
 function computeImageryRectangle(lat, lon, radiusKm = 80) {
   const safeLat = clamp(Number(lat) || 0, -85, 85);
   const safeLon = ((((Number(lon) || 0) + 180) % 360) + 360) % 360 - 180;
@@ -457,6 +471,7 @@ function computeImageryRectangle(lat, lon, radiusKm = 80) {
   };
 }
 
+// Determines intent for satellite imagery request (satellite imagery)
 function getImageryIntent(collectionId, bands) {
   const collection = String(collectionId || '').toUpperCase();
   const normalizedBands = String(bands || '').toUpperCase().replace(/\s+/g, '');
@@ -466,6 +481,7 @@ function getImageryIntent(collectionId, bands) {
   return { falseColor, prefersSentinelHub, prefersLandsat };
 }
 
+// Gets the configured satellite imagery provider (satellite imagery)
 function getConfiguredSatelliteProvider() {
   const provider = String(BACKEND_SATELLITE_IMAGERY_PROVIDER || '').trim().toLowerCase();
   if (provider === 'nasa-gibs') return 'nasa-gibs';
@@ -474,6 +490,7 @@ function getConfiguredSatelliteProvider() {
   return null;
 }
 
+// Gets NASA GIBS layer candidates for a collection (satellite imagery)
 function getNasaGibsLayerCandidates(collectionId, bands) {
   const id = String(collectionId || '').toUpperCase();
   const normalizedBands = String(bands || '').toUpperCase().replace(/\s+/g, '');
@@ -562,6 +579,7 @@ function getNasaGibsLayerCandidates(collectionId, bands) {
   ];
 }
 
+// Picks preferred satellite imagery source order (satellite imagery)
 function pickSatelliteSourceOrder(source, collectionId, bands) {
   const requested = String(source || 'auto').toLowerCase();
   const policy = getCollectionBackendPolicy(collectionId);
@@ -603,6 +621,7 @@ function pickSatelliteSourceOrder(source, collectionId, bands) {
   return [...new Set(autoOrder)];
 }
 
+// Builds a WMS preview URL for satellite imagery (satellite imagery)
 function buildWmsPreviewUrl(baseUrl, { layer, rectangle, date, format = 'image/jpeg', width = SATELLITE_PREVIEW_IMAGE_SIZE, height = SATELLITE_PREVIEW_IMAGE_SIZE }) {
   const url = new URL(baseUrl);
   url.searchParams.set('SERVICE', 'WMS');
@@ -622,6 +641,7 @@ function buildWmsPreviewUrl(baseUrl, { layer, rectangle, date, format = 'image/j
   return url.toString();
 }
 
+// Verifies that a preview URL is reachable (satellite imagery)
 async function verifyPreviewUrl(url) {
   const resp = await fetch(url, {
     headers: HEADERS,
@@ -633,6 +653,7 @@ async function verifyPreviewUrl(url) {
   await resp.arrayBuffer();
 }
 
+// Builds a NASA GIBS preview image (satellite imagery)
 async function buildNasaGibsPreview({ lat, lon, date, collectionId, bands }) {
   const rectangle = computeImageryRectangle(lat, lon, 120);
   const isoDate = normalizeIsoDate(date);
@@ -660,6 +681,7 @@ async function buildNasaGibsPreview({ lat, lon, date, collectionId, bands }) {
   throw new Error(`NASA GIBS preview failed for '${collectionId}'. ${failures.join(' | ')}`);
 }
 
+// Builds a Sentinel Hub preview image (satellite imagery)
 async function buildSentinelHubPreview({ lat, lon, date, collectionId, bands }) {
   if (!SENTINEL_HUB_WMS_URL) {
     throw new Error('Sentinel Hub is not configured on the server');
@@ -683,6 +705,7 @@ async function buildSentinelHubPreview({ lat, lon, date, collectionId, bands }) 
   };
 }
 
+// Builds a Copernicus DataSpace preview image (satellite imagery)
 async function buildCopernicusDataspacePreview({ lat, lon, date, collectionId, bands }) {
   if (!COPERNICUS_DATASPACE_WMS_URL) {
     throw new Error('Copernicus Data Space is not configured on the server');
@@ -706,6 +729,7 @@ async function buildCopernicusDataspacePreview({ lat, lon, date, collectionId, b
   };
 }
 
+// Resolves a preview image for satellite imagery (satellite imagery)
 async function resolveSatelliteImageryPreview({ lat, lon, date, source, collectionId, bands }) {
   const order = pickSatelliteSourceOrder(source, collectionId, bands);
   const backendPolicy = getCollectionBackendPolicy(collectionId);
@@ -746,6 +770,7 @@ async function resolveSatelliteImageryPreview({ lat, lon, date, source, collecti
   throw new Error(failures.map(item => `${item.provider}: ${item.message}`).join(' | ') || 'No satellite imagery providers available');
 }
 
+// Guesses MIME type by file name (general utility, used for camera segments)
 function guessMimeByName(name) {
   const n = String(name || '').toLowerCase();
   if (n.endsWith('.m3u8')) return 'application/vnd.apple.mpegurl';
@@ -755,6 +780,7 @@ function guessMimeByName(name) {
   return 'application/octet-stream';
 }
 
+// Checks if ffmpeg is available on the server (CCTV/camera streaming)
 async function ensureFfmpegAvailable() {
   if (ffmpegChecked) return ffmpegAvailable;
   ffmpegChecked = true;
@@ -766,6 +792,7 @@ async function ensureFfmpegAvailable() {
   return ffmpegAvailable;
 }
 
+// Starts periodic cleanup of idle camera stream sessions (CCTV/camera streaming)
 function startCameraStreamCleanupLoop() {
   if (cameraStreamCleanupTimer) return;
   cameraStreamCleanupTimer = setInterval(() => {
@@ -780,10 +807,12 @@ function startCameraStreamCleanupLoop() {
   cameraStreamCleanupTimer.unref?.();
 }
 
+// Generates a session ID for a camera stream URL (CCTV/camera streaming)
 function cameraSessionIdForUrl(url) {
   return crypto.createHash('sha1').update(url).digest('hex').slice(0, 16);
 }
 
+// Rewrites m3u8 playlist URLs to proxy through the server (CCTV/camera streaming)
 function rewriteM3u8Playlist(playlistText, sourceUrl) {
   return String(playlistText)
     .split(/\r?\n/)
@@ -792,7 +821,7 @@ function rewriteM3u8Playlist(playlistText, sourceUrl) {
       if (!t || t.startsWith('#')) return line;
       try {
         const absolute = new URL(t, sourceUrl).toString();
-        return `/api/localproxy/api/cameras/stream?url=${encodeURIComponent(absolute)}`;
+        return `/api/cameras/stream?url=${encodeURIComponent(absolute)}`;
       } catch {
         return line;
       }
@@ -800,6 +829,7 @@ function rewriteM3u8Playlist(playlistText, sourceUrl) {
     .join('\n');
 }
 
+// Ensures an RTMP/RTSP camera stream session is running (CCTV/camera streaming)
 function ensureRtmpSession(sourceUrl) {
   ensureCameraStreamDir();
   startCameraStreamCleanupLoop();
@@ -848,6 +878,7 @@ function ensureRtmpSession(sourceUrl) {
   return session;
 }
 
+// Waits for the camera stream playlist to be ready (CCTV/camera streaming)
 async function waitForPlaylist(playlistPath, timeoutMs = CAMERA_STREAM_BOOT_TIMEOUT_MS) {
   const t0 = Date.now();
   while ((Date.now() - t0) < timeoutMs) {
@@ -862,6 +893,7 @@ async function waitForPlaylist(playlistPath, timeoutMs = CAMERA_STREAM_BOOT_TIME
   return false;
 }
 
+// Handles proxying of camera streams (CCTV/camera streaming, used by cctv.js)
 async function handleCameraStreamProxy(queryParams, res) {
   const sourceUrl = queryParams.get('url') || '';
   // Always set CORS headers for all responses
@@ -954,12 +986,13 @@ async function handleCameraStreamProxy(queryParams, res) {
     }
 
     const raw = fs.readFileSync(session.playlistPath, 'utf8');
+
     const rewritten = raw
       .split(/\r?\n/)
       .map((line) => {
         const t = line.trim();
         if (!t || t.startsWith('#')) return line;
-        return `/api/localproxy/api/cameras/hls/${session.id}/${encodeURIComponent(t)}`;
+        return `/api/cameras/hls/${session.id}/${encodeURIComponent(t)}`;
       })
       .join('\n');
 
@@ -979,6 +1012,7 @@ async function handleCameraStreamProxy(queryParams, res) {
   res.end(JSON.stringify({ error: `unsupported protocol: ${protocol}` }));
 }
 
+// Serves HLS video segments for proxied camera streams (CCTV/camera streaming)
 async function handleCameraHlsSegment(urlPath, res) {
   const m = urlPath.match(/^\/api\/cameras\/hls\/([^/]+)\/(.+)$/);
   if (!m) {
@@ -1028,6 +1062,7 @@ async function handleCameraHlsSegment(urlPath, res) {
   res.end(body);
 }
 
+// Returns health/status of camera stream subsystem (CCTV/camera streaming)
 async function handleCameraStreamHealth(res) {
   const hasFfmpeg = await ensureFfmpegAvailable();
   const now = Date.now();
@@ -1050,6 +1085,7 @@ async function handleCameraStreamHealth(res) {
   }));
 }
 
+// Returns file paths for a tile cache entry (tile caching)
 function tileCachePaths(cacheKey) {
   return {
     metaPath: path.join(TILE_CACHE_DIR, `${cacheKey}.json`),
@@ -1057,6 +1093,7 @@ function tileCachePaths(cacheKey) {
   };
 }
 
+// Reads a tile cache entry if fresh (tile caching)
 function readTileCache(cacheKey, maxAgeMs = TILE_CACHE_TTL_MS) {
   const { metaPath, bodyPath } = tileCachePaths(cacheKey);
   if (!fs.existsSync(metaPath) || !fs.existsSync(bodyPath)) return null;
@@ -1073,6 +1110,7 @@ function readTileCache(cacheKey, maxAgeMs = TILE_CACHE_TTL_MS) {
   }
 }
 
+// Writes a tile cache entry (tile caching)
 function writeTileCache(cacheKey, payload) {
   try {
     ensureTileCacheDir();
@@ -1092,6 +1130,7 @@ function writeTileCache(cacheKey, payload) {
   }
 }
 
+// Sends a binary HTTP response (general utility)
 function sendBinaryResponse(res, status, headers, body) {
   if (res.headersSent) return;
   res.writeHead(status, headers);
@@ -1099,6 +1138,7 @@ function sendBinaryResponse(res, status, headers, body) {
   res.end(body);
 }
 
+// Builds a Google tile URL for proxying (tile proxy)
 function buildGoogleTileUrl(urlPath, queryParams) {
   if (!GOOGLE_ROUTES_KEY) {
     throw new Error('Google Maps API key missing on server');
@@ -1116,6 +1156,7 @@ function buildGoogleTileUrl(urlPath, queryParams) {
   return upstream.toString();
 }
 
+// Builds a MapTiler tile URL for proxying (tile proxy)
 function buildMapTilerTileUrl(urlPath, queryParams) {
   const key = process.env.VITE_MAPTILER_API_KEY || DOTENV_VARS.get('VITE_MAPTILER_API_KEY') || '';
   if (!key) {
@@ -1134,6 +1175,7 @@ function buildMapTilerTileUrl(urlPath, queryParams) {
   return upstream.toString();
 }
 
+// Fetches a tile from upstream and caches it (tile proxy)
 async function fetchAndCacheTile(upstreamUrl, cacheKey) {
   const cached = readTileCache(cacheKey, TILE_CACHE_TTL_MS);
   if (cached) return { ...cached, cacheHit: true, stale: false };
@@ -1179,6 +1221,7 @@ async function fetchAndCacheTile(upstreamUrl, cacheKey) {
   return promise;
 }
 
+// Handles proxying of map tile requests (tile proxy)
 async function handleTileProxy(urlPath, queryParams, res) {
   let upstreamUrl;
   if (urlPath.startsWith('/tiles/google/')) {
