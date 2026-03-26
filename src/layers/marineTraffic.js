@@ -209,7 +209,7 @@ function applyVesselSnapshot(vessels = []) {
             scale: 1.0,
             verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
             heightReference: Cesium.HeightReference.NONE,
-            disableDepthTestDistance: Number.POSITIVE_INFINITY,
+            disableDepthTestDistance: 0, // Enable depth test so icons are hidden behind the globe
             eyeOffset: new Cesium.Cartesian3(0, 0, 0),
           },
           label: {
