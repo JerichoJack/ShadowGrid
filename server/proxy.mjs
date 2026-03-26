@@ -5014,7 +5014,7 @@ async function getMarinePayload(bounds) {
 
     ws.on('message', (data) => {
       try {
-        console.log('[aisstream] Message received:', data.toString());
+        // console.log('[aisstream] Message received:', data.toString());
         const msg = JSON.parse(data);
         if (msg && msg.MessageType === 'PositionReport' && msg.Message && msg.Message.PositionReport && msg.MetaData) {
           const m = msg.Message.PositionReport;

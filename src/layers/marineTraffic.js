@@ -206,11 +206,12 @@ function applyVesselSnapshot(vessels = []) {
           billboard: {
             image: buildShipSvgUri(vesselType, color),
             color: color,
-            scale: 1.0,
+            scale: 1.5, // Increased for better pickability
             verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
             heightReference: Cesium.HeightReference.NONE,
             disableDepthTestDistance: 0, // Enable depth test so icons are hidden behind the globe
             eyeOffset: new Cesium.Cartesian3(0, 0, 0),
+            show: true,
           },
           label: {
             text: vessel.name || vesselId,
