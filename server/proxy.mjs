@@ -5627,28 +5627,38 @@ const server = http.createServer(async (req, res) => {
       res.writeHead(200);
       res.end(JSON.stringify(payload));
     } catch (err) {
+      if (res.headersSent) return;
       res.writeHead(502);
+      if (res.headersSent) return;
       res.end(JSON.stringify({ error: err?.message ?? 'traffic request failed' }));
       return;
     }
   } else if (url === '/api/marine/snapshot') {
     const parts = (query.bounds ?? '').split(',').map(Number);
     if (parts.length !== 4 || parts.some(n => !Number.isFinite(n))) {
+      if (res.headersSent) return;
       res.writeHead(400);
+      if (res.headersSent) return;
       res.end(JSON.stringify({ error: 'bounds must be minLon,minLat,maxLon,maxLat' }));
       return;
     }
     try {
       const payload = await getMarinePayload(parts);
+      if (res.headersSent) return;
       res.writeHead(200);
+      if (res.headersSent) return;
       res.end(JSON.stringify(payload));
     } catch (err) {
+      if (res.headersSent) return;
       res.writeHead(502);
+      if (res.headersSent) return;
       res.end(JSON.stringify({ error: err?.message ?? 'marine snapshot failed' }));
       return;
     }
   } else if (url === '/api/satellite-imagery/health') {
+    if (res.headersSent) return;
     res.writeHead(200);
+    if (res.headersSent) return;
     res.end(JSON.stringify({
       ok: true,
       ts: Date.now(),
@@ -5659,7 +5669,9 @@ const server = http.createServer(async (req, res) => {
     const lat = Number(query.lat);
     const lon = Number(query.lon);
     if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+      if (res.headersSent) return;
       res.writeHead(400);
+      if (res.headersSent) return;
       res.end(JSON.stringify({ error: 'lat and lon are required numeric query params' }));
       return;
     }
@@ -5673,7 +5685,9 @@ const server = http.createServer(async (req, res) => {
       bands: String(query.bands ?? ''),
     });
     if (!validation.ok) {
+      if (res.headersSent) return;
       res.writeHead(400);
+      if (res.headersSent) return;
       res.end(JSON.stringify({ error: validation.error }));
       return;
     }
@@ -5688,7 +5702,9 @@ const server = http.createServer(async (req, res) => {
         collectionId: request.collectionId,
         bands: request.bands,
       });
+      if (res.headersSent) return;
       res.writeHead(200);
+      if (res.headersSent) return;
       res.end(JSON.stringify({
         ...payload,
         location: { lat: request.lat, lon: request.lon },
@@ -5697,7 +5713,9 @@ const server = http.createServer(async (req, res) => {
         sentinelHubConfigured: Boolean(SENTINEL_HUB_WMS_URL),
       }));
     } catch (err) {
+      if (res.headersSent) return;
       res.writeHead(502);
+      if (res.headersSent) return;
       res.end(JSON.stringify({ error: err?.message ?? 'satellite imagery preview failed' }));
     }
   } else if (url === '/api/satellites/snapshot') {
@@ -5711,23 +5729,31 @@ const server = http.createServer(async (req, res) => {
       .filter(Boolean);
     try {
       const payload = await getSatellitesSnapshotPayload(maxCount, { perCategory, categories });
+      if (res.headersSent) return;
       res.writeHead(200);
+      if (res.headersSent) return;
       res.end(JSON.stringify(payload));
     } catch (err) {
+      if (res.headersSent) return;
       res.writeHead(502);
+      if (res.headersSent) return;
       res.end(JSON.stringify({ error: err?.message ?? 'satellite snapshot failed' }));
     }
   } else if (url === '/api/cameras/snapshot') {
     const parts = (query.bounds ?? '').split(',').map(Number);
     if (parts.length !== 4 || parts.some(n => !Number.isFinite(n))) {
+      if (res.headersSent) return;
       res.writeHead(400);
+      if (res.headersSent) return;
       res.end(JSON.stringify({ error: 'bounds must be minLon,minLat,maxLon,maxLat' }));
       return;
     }
     const maxCount = Math.max(parseInt(query.max ?? `${CAMERA_MAX_POINTS}`, 10) || CAMERA_MAX_POINTS, 1);
     try {
       const payload = await getCameraSnapshot(parts, maxCount);
+      if (res.headersSent) return;
       res.writeHead(200);
+      if (res.headersSent) return;
       res.end(JSON.stringify(payload));
     } catch (err) {
       res.writeHead(502);
