@@ -5154,6 +5154,16 @@ const getAircraftDebugLogPath = () => {
 };
 
 const server = http.createServer(async (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  res.setHeader('Content-Type', 'application/json');
+  if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
+
+  // Parse URL and query
+  const [path, qs] = req.url.split('?');
+  const queryParams = new URLSearchParams(qs ?? '');
+  const query = Object.fromEntries(queryParams);
+  const url = path.replace(/\/$/, '');
     // Aircraft Debug Log Endpoint
     if (req.method === 'POST' && req.url === '/api/logs/aircraft-debug') {
       let body = '';
@@ -5173,16 +5183,6 @@ const server = http.createServer(async (req, res) => {
       });
       return;
     }
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept');
-  if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
-
-  // Parse URL and query
-  const [path, qs] = req.url.split('?');
-  const queryParams = new URLSearchParams(qs ?? '');
-  const query = Object.fromEntries(queryParams);
-  const url = path.replace(/\/$/, '');
 
   // Aircraft Info Proxy Endpoint: GET /api/proxy/aircraft/:icao or /api/proxy/aircraft?icao=... or ?icao24=...
   if (req.method === 'GET' && (url.startsWith('/api/proxy/aircraft/'))) {
@@ -5354,6 +5354,49 @@ const server = http.createServer(async (req, res) => {
         copernicusDataspaceConfigured: Boolean(COPERNICUS_DATASPACE_WMS_URL),
         sentinelHubConfigured: Boolean(SENTINEL_HUB_WMS_URL),
       }));
+    } else if (url === '/api/satellite-imagery/preview') {
+      const lat = Number(query.lat);
+      const lon = Number(query.lon);
+      if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+        res.writeHead(400);
+        res.end(JSON.stringify({ error: 'lat and lon are required numeric query params' }));
+        return;
+      }
+      const validation = validateSatelliteImageryRequest({
+        lat,
+        lon,
+        date: String(query.date ?? ''),
+        source: String(query.source ?? 'auto'),
+        collectionId: String(query.collection ?? ''),
+        bands: String(query.bands ?? ''),
+      });
+      if (!validation.ok) {
+        res.writeHead(400);
+        res.end(JSON.stringify({ error: validation.error }));
+        return;
+      }
+      const request = validation.value;
+      try {
+        const payload = await resolveSatelliteImageryPreview({
+          lat: request.lat,
+          lon: request.lon,
+          date: request.date,
+          source: request.source,
+          collectionId: request.collectionId,
+          bands: request.bands,
+        });
+        res.writeHead(200);
+        res.end(JSON.stringify({
+          ...payload,
+          location: { lat: request.lat, lon: request.lon },
+          request,
+          copernicusDataspaceConfigured: Boolean(COPERNICUS_DATASPACE_WMS_URL),
+          sentinelHubConfigured: Boolean(SENTINEL_HUB_WMS_URL),
+        }));
+      } catch (err) {
+        res.writeHead(502);
+        res.end(JSON.stringify({ error: err?.message ?? 'satellite imagery preview failed' }));
+      }
     } else if (url === '/api/satellites/snapshot') {
       const rawMax = parseInt(query.max ?? '0', 10);
       const maxCount = rawMax > 0 ? rawMax : Infinity;
@@ -5399,69 +5442,56 @@ const server = http.createServer(async (req, res) => {
         .filter(Boolean);
       const maxCam = Math.max(parseInt(query.camMax ?? `${CAMERA_MAX_POINTS}`, 10) || CAMERA_MAX_POINTS, 1);
       try {
-        // Guard: if request is aborted, do not proceed
-        if (req.aborted) return;
-
-        // Optionally, listen for abort and set a flag
-        let aborted = false;
-        const onAborted = () => { aborted = true; };
-        req.on('aborted', onAborted);
-
-        try {
-          const payload = { ts: Date.now(), mode: SERVER_HEAVY_MODE ? 'heavy' : 'normal' };
-          const flightsPromise = include.has('flights')
-            ? getFlightsPayload({
-              bounds: bounds ? bounds.join(',') : '',
-              mode: 'heavy',
-            })
-            : null;
-          const satellitesPromise = include.has('satellites')
-            ? getSatellitesSnapshotPayload(maxSat, { perCategory: satPerCategory, categories: satCategories })
-            : null;
-          const trafficPromise = (include.has('traffic') && bounds)
-            ? getTrafficPayload(bounds)
-            : null;
-          const marinePromise = (include.has('marine') && bounds)
-            ? getMarinePayload(bounds)
-            : null;
-          const camerasPromise = (include.has('cameras') && bounds)
-            ? getCameraSnapshot(bounds, maxCam)
-            : null;
-          const [flightsPayload, satellitesPayload, trafficPayload, marinePayload, camerasPayload] = await Promise.all([
-            flightsPromise,
-            satellitesPromise,
-            trafficPromise,
-            marinePromise,
-            camerasPromise,
-          ]);
-          if (aborted || req.aborted) return;
-          if (flightsPayload) payload.flights = flightsPayload;
-          if (satellitesPayload) payload.satellites = satellitesPayload;
-          if (trafficPayload) payload.traffic = trafficPayload;
-          if (marinePayload) payload.marine = marinePayload;
-          if (camerasPayload) payload.cameras = camerasPayload;
-          payload.diagnostics = {
-            providers: {
-              flights: payload.flights?.source ?? null,
-              satellites: payload.satellites?.source ?? null,
-              traffic: payload.traffic?.source ?? null,
-              marine: payload.marine?.source ?? null,
-              cameras: payload.cameras?.source ?? null,
-            },
-            cache: {
-              flights: payload.flights?.cacheHit ?? null,
-              satellites: payload.satellites?.cacheHit ?? null,
-              traffic: payload.traffic?.cacheHit ?? null,
-              marine: payload.marine?.cacheHit ?? null,
-              cameras: payload.cameras?.cacheHit ?? null,
-            },
-          };
-          if (!res.headersSent && !aborted && !req.aborted) {
-            res.writeHead(200);
-            res.end(JSON.stringify(payload));
-          }
-        } finally {
-          req.off('aborted', onAborted);
+        const payload = { ts: Date.now(), mode: SERVER_HEAVY_MODE ? 'heavy' : 'normal' };
+        const flightsPromise = include.has('flights')
+          ? getFlightsPayload({
+            bounds: bounds ? bounds.join(',') : '',
+            mode: 'heavy',
+          })
+          : null;
+        const satellitesPromise = include.has('satellites')
+          ? getSatellitesSnapshotPayload(maxSat, { perCategory: satPerCategory, categories: satCategories })
+          : null;
+        const trafficPromise = (include.has('traffic') && bounds)
+          ? getTrafficPayload(bounds)
+          : null;
+        const marinePromise = (include.has('marine') && bounds)
+          ? getMarinePayload(bounds)
+          : null;
+        const camerasPromise = (include.has('cameras') && bounds)
+          ? getCameraSnapshot(bounds, maxCam)
+          : null;
+        const [flightsPayload, satellitesPayload, trafficPayload, marinePayload, camerasPayload] = await Promise.all([
+          flightsPromise,
+          satellitesPromise,
+          trafficPromise,
+          marinePromise,
+          camerasPromise,
+        ]);
+        if (flightsPayload) payload.flights = flightsPayload;
+        if (satellitesPayload) payload.satellites = satellitesPayload;
+        if (trafficPayload) payload.traffic = trafficPayload;
+        if (marinePayload) payload.marine = marinePayload;
+        if (camerasPayload) payload.cameras = camerasPayload;
+        payload.diagnostics = {
+          providers: {
+            flights: payload.flights?.source ?? null,
+            satellites: payload.satellites?.source ?? null,
+            traffic: payload.traffic?.source ?? null,
+            marine: payload.marine?.source ?? null,
+            cameras: payload.cameras?.source ?? null,
+          },
+          cache: {
+            flights: payload.flights?.cacheHit ?? null,
+            satellites: payload.satellites?.cacheHit ?? null,
+            traffic: payload.traffic?.cacheHit ?? null,
+            marine: payload.marine?.cacheHit ?? null,
+            cameras: payload.cameras?.cacheHit ?? null,
+          },
+        };
+        if (!res.headersSent) {
+          res.writeHead(200);
+          res.end(JSON.stringify(payload));
         }
         return;
       } catch (err) {
@@ -5597,10 +5627,8 @@ const server = http.createServer(async (req, res) => {
       res.writeHead(200);
       res.end(JSON.stringify(payload));
     } catch (err) {
-      if (!res.headersSent) {
-        res.writeHead(502);
-        res.end(JSON.stringify({ error: err?.message ?? 'traffic request failed' }));
-      }
+      res.writeHead(502);
+      res.end(JSON.stringify({ error: err?.message ?? 'traffic request failed' }));
       return;
     }
   } else if (url === '/api/marine/snapshot') {
@@ -5615,10 +5643,8 @@ const server = http.createServer(async (req, res) => {
       res.writeHead(200);
       res.end(JSON.stringify(payload));
     } catch (err) {
-      if (!res.headersSent) {
-        res.writeHead(502);
-        res.end(JSON.stringify({ error: err?.message ?? 'marine snapshot failed' }));
-      }
+      res.writeHead(502);
+      res.end(JSON.stringify({ error: err?.message ?? 'marine snapshot failed' }));
       return;
     }
   } else if (url === '/api/satellite-imagery/health') {
@@ -5688,10 +5714,8 @@ const server = http.createServer(async (req, res) => {
       res.writeHead(200);
       res.end(JSON.stringify(payload));
     } catch (err) {
-      if (!res.headersSent) {
-        res.writeHead(502);
-        res.end(JSON.stringify({ error: err?.message ?? 'satellite snapshot failed' }));
-      }
+      res.writeHead(502);
+      res.end(JSON.stringify({ error: err?.message ?? 'satellite snapshot failed' }));
     }
   } else if (url === '/api/cameras/snapshot') {
     const parts = (query.bounds ?? '').split(',').map(Number);
