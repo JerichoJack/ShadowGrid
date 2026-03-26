@@ -4964,12 +4964,12 @@ async function getMarinePayload(bounds) {
     ws.on('open', () => {
       console.log('[aisstream] WebSocket opened. Sending subscription...');
       // Subscribe to all vessel positions (filter by bounds client-side)
-      // Per aisstream.io docs, the correct subscription object is:
-      // { "APIKey": <key>, "BoundingBoxes": [[minLat, minLon, maxLat, maxLon]], "Types": ["PositionReport"] }
+      // Per aisstream.io docs, BoundingBoxes is an array of [SW, NE] points
+      // { "APIKey": <key>, "BoundingBoxes": [ [ [minLat, minLon], [maxLat, maxLon] ] ], "FilterMessageTypes": ["PositionReport"] }
       ws.send(JSON.stringify({
         APIKey: AISSTREAM_API_KEY,
-        BoundingBoxes: [[minLat, minLon, maxLat, maxLon]],
-        Types: ["PositionReport"]
+        BoundingBoxes: [ [ [minLat, minLon], [maxLat, maxLon] ] ],
+        FilterMessageTypes: ["PositionReport"]
       }));
       // Set a timeout to close after 2 seconds (rate limit: 1 req/sec)
       timeout = setTimeout(() => ws.close(), 2000);
