@@ -18,6 +18,7 @@
  */
 
 import http from 'http';
+import WebSocket from 'ws';
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
@@ -73,6 +74,7 @@ const SPACETRACK_PASS = process.env.VITE_SPACETRACK_PASSWORD || DOTENV_VARS.get(
 const N2YO_KEY = process.env.VITE_N2YO_API_KEY || DOTENV_VARS.get('VITE_N2YO_API_KEY') || '';
 const AIS_PROXY_URL = process.env.VITE_MARINE_AIS_PROXY_URL || DOTENV_VARS.get('VITE_MARINE_AIS_PROXY_URL') || '';
 const AIS_PROXY_KEY = process.env.VITE_MARINE_AIS_PROXY_KEY || DOTENV_VARS.get('VITE_MARINE_AIS_PROXY_KEY') || '';
+const AISSTREAM_API_KEY = process.env.VITE_AISSTREAM_API_KEY || DOTENV_VARS.get('VITE_AISSTREAM_API_KEY') || '';
 const SENTINEL_HUB_INSTANCE_ID = process.env.SENTINEL_HUB_INSTANCE_ID || process.env.VITE_SENTINEL_HUB_INSTANCE_ID || DOTENV_VARS.get('SENTINEL_HUB_INSTANCE_ID') || DOTENV_VARS.get('VITE_SENTINEL_HUB_INSTANCE_ID') || '';
 const SENTINEL_HUB_TRUE_COLOR_LAYER = process.env.SENTINEL_HUB_TRUE_COLOR_LAYER || process.env.VITE_SENTINEL_HUB_TRUE_COLOR_LAYER || DOTENV_VARS.get('SENTINEL_HUB_TRUE_COLOR_LAYER') || DOTENV_VARS.get('VITE_SENTINEL_HUB_TRUE_COLOR_LAYER') || 'TRUE_COLOR';
 const SENTINEL_HUB_FALSE_COLOR_LAYER = process.env.SENTINEL_HUB_FALSE_COLOR_LAYER || process.env.VITE_SENTINEL_HUB_FALSE_COLOR_LAYER || DOTENV_VARS.get('SENTINEL_HUB_FALSE_COLOR_LAYER') || DOTENV_VARS.get('VITE_SENTINEL_HUB_FALSE_COLOR_LAYER') || SENTINEL_HUB_TRUE_COLOR_LAYER;
@@ -4916,9 +4918,12 @@ async function getMarinePayload(bounds) {
 
   const providerOrder = (() => {
     if (BACKEND_MARINE_PROVIDER === 'ais') return ['ais'];
+    if (BACKEND_MARINE_PROVIDER === 'aisstream') return ['aisstream'];
     if (BACKEND_MARINE_PROVIDER === 'overpass') return ['overpass'];
-    // auto: prefer AIS when configured, otherwise Overpass.
-    return AIS_PROXY_URL ? ['ais', 'overpass'] : ['overpass'];
+    // auto: prefer aisstream if key, then AIS proxy, then Overpass.
+    if (AISSTREAM_API_KEY) return ['aisstream', 'ais', 'overpass'];
+    if (AIS_PROXY_URL) return ['ais', 'overpass'];
+    return ['overpass'];
   })();
 
   for (const provider of providerOrder) {
@@ -4926,6 +4931,9 @@ async function getMarinePayload(bounds) {
       if (provider === 'ais') {
         vessels = await fetchAisVessels(b);
         source = 'ais-live-server';
+      } else if (provider === 'aisstream') {
+        vessels = await fetchAisstreamVessels(b);
+        source = 'aisstream-live-server';
       } else {
         const query = overpassMarineQuery(b);
         const response = await fetchOverpassJson(query, 22_000);
@@ -4937,6 +4945,72 @@ async function getMarinePayload(bounds) {
     } catch (error) {
       errors.push(`${provider}:${error?.message ?? 'unknown'}`);
     }
+  // Fetch vessels from aisstream.io WebSocket API
+  async function fetchAisstreamVessels(bounds) {
+    if (!AISSTREAM_API_KEY) throw new Error('AISStream API key missing');
+    // bounds: [minLon, minLat, maxLon, maxLat]
+    const [minLon, minLat, maxLon, maxLat] = bounds;
+    const wsUrl = 'wss://stream.aisstream.io/v0/stream';
+    const vessels = new Map();
+    let resolve, reject;
+    const resultPromise = new Promise((res, rej) => { resolve = res; reject = rej; });
+    let timeout;
+
+    const ws = new WebSocket(wsUrl, {
+      headers: { 'Authorization': AISSTREAM_API_KEY }
+    });
+
+    ws.on('open', () => {
+      // Subscribe to all vessel positions (filter by bounds client-side)
+      ws.send(JSON.stringify({ "APIKey": AISSTREAM_API_KEY, "BoundingBoxes": [[minLon, minLat, maxLon, maxLat]], "FilterMessageTypes": ["PositionReport"] }));
+      // Set a timeout to close after 2 seconds (rate limit: 1 req/sec)
+      timeout = setTimeout(() => ws.close(), 2000);
+    });
+
+    ws.on('message', (data) => {
+      try {
+        const msg = JSON.parse(data);
+        if (msg && msg.MessageType === 'PositionReport' && msg.Message) {
+          const m = msg.Message;
+          // Filter by bounds (defensive)
+          if (m.Lon >= minLon && m.Lon <= maxLon && m.Lat >= minLat && m.Lat <= maxLat) {
+            vessels.set(m.MMSI, {
+              id: `aisstream-${m.MMSI}`,
+              lat: m.Lat,
+              lon: m.Lon,
+              name: m.ShipName || `AIS ${m.MMSI}`,
+              type: String(m.ShipType || '').toLowerCase(),
+              speed: m.SOG ?? null,
+              heading: m.COG ?? null,
+              simulated: false,
+              tags: {
+                ship: String(m.ShipType || '').toLowerCase(),
+                mmsi: m.MMSI,
+                imo: m.IMO ?? null,
+              },
+              track: buildTrackPoints(m.Lat, m.Lon, m.COG ?? 0, m.SOG ?? 8),
+            });
+          }
+        }
+      } catch {}
+    });
+
+    ws.on('close', () => {
+      clearTimeout(timeout);
+      resolve(Array.from(vessels.values()));
+    });
+    ws.on('error', (err) => {
+      clearTimeout(timeout);
+      reject(err);
+    });
+
+    // Enforce a hard timeout (rate limit: 1/sec)
+    setTimeout(() => {
+      if (ws.readyState !== WebSocket.CLOSED && ws.readyState !== WebSocket.CLOSING) ws.close();
+    }, 2200);
+
+    return resultPromise;
+  }
   }
 
   if (!vessels.length && errors.length > 0) {
