@@ -4932,8 +4932,45 @@ async function getMarinePayload(bounds) {
         vessels = await fetchAisVessels(b);
         source = 'ais-live-server';
       } else if (provider === 'aisstream') {
-        vessels = await fetchAisstreamVessels(b);
-        source = 'aisstream-live-server';
+        // --- Global mode: if bounds cover the world or bounds param is 'global', fetch all hubs ---
+        const isGlobal = (
+          b[0] <= -179.9 && b[1] <= -89.9 && b[2] >= 179.9 && b[3] >= 89.9
+        ) || (typeof bounds === 'string' && bounds.toLowerCase() === 'global');
+        if (isGlobal) {
+          console.log('[aisstream] Global mode: subscribing to all grid cells...');
+          const allVessels = new Map();
+          // Limit concurrency to avoid rate limits (aisstream: 1/sec per connection)
+          const MAX_CONCURRENCY = 4;
+          let idx = 0;
+          async function fetchBatch(batch) {
+            await Promise.all(batch.map(async (hub) => {
+              // Each hub is {lat, lon}; create a bounding box of ~10x10 deg around it
+              const halfSize = 5; // degrees
+              const minLat = Math.max(-90, hub.lat - halfSize);
+              const maxLat = Math.min(90, hub.lat + halfSize);
+              const minLon = Math.max(-180, hub.lon - halfSize);
+              const maxLon = Math.min(180, hub.lon + halfSize);
+              try {
+                const vessels = await fetchAisstreamVessels([minLon, minLat, maxLon, maxLat]);
+                for (const v of vessels) {
+                  if (v && v.id) allVessels.set(v.id, v);
+                }
+              } catch (err) {
+                console.warn(`[aisstream] Hub fetch failed: ${hub.lat},${hub.lon} — ${err.message}`);
+              }
+            }));
+          }
+          while (idx < ALL_HUBS.length) {
+            const batch = ALL_HUBS.slice(idx, idx + MAX_CONCURRENCY);
+            await fetchBatch(batch);
+            idx += MAX_CONCURRENCY;
+          }
+          vessels = Array.from(allVessels.values());
+          source = 'aisstream-live-server-global';
+        } else {
+          vessels = await fetchAisstreamVessels(b);
+          source = 'aisstream-live-server';
+        }
       } else {
         const query = overpassMarineQuery(b);
         const response = await fetchOverpassJson(query, 22_000);
