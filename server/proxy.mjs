@@ -509,7 +509,7 @@ function getCollectionBackendPolicy(collectionId) {
   if (id.startsWith('COPERNICUS/S5P/')) {
     return {
       authority: 'ESA Copernicus / Sentinel-5P',
-      preferredBackend: 'nasa-gibs', // changed from 'copernicus-dataspace' for troubleshooting
+      preferredBackend: 'copernicus-dataspace', 
       allowedSources: ['auto', 'nasa-gibs', 'copernicus-dataspace', 'sentinel-hub', 'basemap'], // added 'nasa-gibs' for troubleshooting
       requiresRemoteCredentials: true,
     };
@@ -517,7 +517,7 @@ function getCollectionBackendPolicy(collectionId) {
   if (id.startsWith('COPERNICUS/')) {
     return {
       authority: 'ESA Copernicus',
-      preferredBackend: 'nasa-gibs', // changed from 'copernicus-dataspace' for troubleshooting
+      preferredBackend: 'copernicus-dataspace', 
       allowedSources: ['auto', 'nasa-gibs', 'copernicus-dataspace', 'sentinel-hub', 'basemap'], // added 'nasa-gibs' for troubleshooting
       requiresRemoteCredentials: true,
     };
@@ -525,7 +525,7 @@ function getCollectionBackendPolicy(collectionId) {
   if (id.startsWith('LANDSAT/')) {
     return {
       authority: 'NASA / USGS',
-      preferredBackend: 'nasa-gibs', // changed from 'copernicus-dataspace' for troubleshooting
+      preferredBackend: 'copernicus-dataspace', 
       allowedSources: ['auto', 'nasa-gibs', 'copernicus-dataspace', 'sentinel-hub', 'basemap'], // added 'nasa-gibs' for troubleshooting
       requiresRemoteCredentials: true,
     };
@@ -573,7 +573,7 @@ function getCollectionBackendPolicy(collectionId) {
   if (id === 'ASTER/AST_L1T_003') {
     return {
       authority: 'NASA / METI ASTER',
-      preferredBackend: 'nasa-gibs', // changed from 'copernicus-dataspace' for troubleshooting
+      preferredBackend: 'copernicus-dataspace', 
       allowedSources: ['auto', 'nasa-gibs', 'copernicus-dataspace', 'sentinel-hub', 'basemap'], // added 'nasa-gibs' for troubleshooting
       requiresRemoteCredentials: true,
     };
@@ -581,7 +581,7 @@ function getCollectionBackendPolicy(collectionId) {
   if (id === 'NASA/ASTER_GED/AG100_003') {
     return {
       authority: 'NASA ASTER',
-      preferredBackend: 'nasa-gibs', // changed from 'copernicus-dataspace' for troubleshooting
+      preferredBackend: 'copernicus-dataspace', 
       allowedSources: ['auto', 'nasa-gibs', 'copernicus-dataspace', 'sentinel-hub', 'basemap'], // added 'nasa-gibs' for troubleshooting
       requiresRemoteCredentials: true,
     };
