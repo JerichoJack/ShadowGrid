@@ -420,9 +420,10 @@ function renderSelectionOverlay(cam) {
         semiMajorAxis: rangeM,
         semiMinorAxis: rangeM,
         material: fillColor,
-        outline: true,
+        outline: false,
         outlineColor: edgeColor,
         heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+        height: 0,
       },
     }));
     return;
@@ -433,10 +434,11 @@ function renderSelectionOverlay(cam) {
     polygon: {
       hierarchy,
       material: fillColor,
-      outline: true,
+      outline: false,
       outlineColor: edgeColor,
       perPositionHeight: false,
       heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+      height: 0,
     },
   }));
 
@@ -480,9 +482,10 @@ function createPersistentFovEntities(cam) {
         semiMajorAxis: rangeM,
         semiMinorAxis: rangeM,
         material: fillColor,
-        outline: true,
+        outline: false,
         outlineColor: edgeColor,
         heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+        height: 0,
       },
     }));
     return entities;
@@ -494,10 +497,11 @@ function createPersistentFovEntities(cam) {
     polygon: {
       hierarchy,
       material: fillColor,
-      outline: true,
+      outline: false,
       outlineColor: edgeColor,
       perPositionHeight: false,
       heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+      height: 0,
     },
   }));
 

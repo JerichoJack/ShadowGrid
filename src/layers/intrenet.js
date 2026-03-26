@@ -113,7 +113,7 @@ function addInternetBlackout(zone, nowMs, maxHeight, usedIds) {
     id: reserveUniqueId(zone.id, usedIds),
     polygon: {
       hierarchy: Cesium.Cartesian3.fromDegreesArray(flattenPoints(points)),
-      height: Number(zone.floorMeters ?? 0),
+        height: 0,
       extrudedHeight: Number(zone.ceilingMeters ?? maxHeight),
       material: fill,
       outline: false,

@@ -262,6 +262,7 @@ function createSatelliteFootprintEntity(viewer, record) {
     return getSatelliteFootprintRadiusM(currentPosition);
   }, false);
 
+  // If this ellipse is meant to be clamped to ground, set outline: false to avoid Cesium warnings.
   return viewer.entities.add({
     position,
     ellipse: {
@@ -271,7 +272,7 @@ function createSatelliteFootprintEntity(viewer, record) {
       material: new Cesium.ColorMaterialProperty(
         new Cesium.CallbackProperty(() => getSatelliteHighlightColor(record.meta).withAlpha(0.12, new Cesium.Color()), false)
       ),
-      outline: true,
+      outline: false, // Prevent Cesium warning for ground overlays
       outlineColor: new Cesium.CallbackProperty(() => getSatelliteHighlightColor(record.meta).withAlpha(0.9, new Cesium.Color()), false),
       numberOfVerticalLines: 0,
     },

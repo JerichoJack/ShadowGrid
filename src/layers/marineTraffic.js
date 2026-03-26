@@ -146,6 +146,7 @@ function applyVesselSnapshot(vessels = []) {
         record.track.show = enabled;
         record.trail = track;
       } else {
+
         const pointEntity = viewer.entities.add({
           id: `marine-point-${vesselId}`,
           position: Cesium.Cartesian3.fromDegrees(vessel.lon, vessel.lat, 10),
@@ -155,6 +156,7 @@ function applyVesselSnapshot(vessels = []) {
             outlineColor: Cesium.Color.WHITE,
             outlineWidth: 1,
             heightReference: Cesium.HeightReference.NONE,
+            height: 10,
           },
           label: {
             text: vessel.name || vesselId,
@@ -183,7 +185,7 @@ function applyVesselSnapshot(vessels = []) {
             positions: trackPositions,
             width: 2,
             material: color.withAlpha(0.35),
-            clampToGround: false,
+            clampToGround: false, // Not clamped, so outline is fine
             arcType: Cesium.ArcType.GEODESIC,
           },
           show: enabled,

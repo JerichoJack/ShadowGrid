@@ -2215,16 +2215,17 @@ function addFlightRestrictionZone(zone, nowMs, maxHeight, usedIds) {
     id: reserveFlightZoneId(zone.id, usedIds),
     polygon: {
       hierarchy: Cesium.Cartesian3.fromDegreesArray(flattenPoints(points)),
-      height: 0,
+      height: 0, // Explicit height for ground reference
       extrudedHeight: maxHeight,
       material,
-      outline: false,
+      outline: false, // No outline for ground/extruded polygons
     },
     polyline: {
       positions: Cesium.Cartesian3.fromDegreesArray(flattenClosedPoints(points)),
       width: isSafeAirspace ? 3 : 2,
       clampToGround: true,
       material: outline,
+      // outline not supported for ground polylines
     },
     properties: {
       type: 'zone',
@@ -2253,16 +2254,17 @@ function addGpsInterferenceZone(zone, nowMs, maxHeight, usedIds) {
     id: reserveFlightZoneId(zone.id, usedIds),
     polygon: {
       hierarchy: Cesium.Cartesian3.fromDegreesArray(flattenPoints(points)),
-      height: Number(zone.floorMeters ?? 0),
+      height: Number(zone.floorMeters ?? 0), // Explicit height for ground reference
       extrudedHeight: Number(zone.ceilingMeters ?? maxHeight),
       material: fill,
-      outline: false,
+      outline: false, // No outline for ground/extruded polygons
     },
     polyline: {
       positions: Cesium.Cartesian3.fromDegreesArray(flattenClosedPoints(points)),
       width: 2,
       clampToGround: true,
       material: outline,
+      // outline not supported for ground polylines
     },
     properties: {
       type: 'zone',
