@@ -10,3 +10,5 @@ package-lock.json
 
 # Generated camera database (rebuild with: node server/collectors/collectCameras.mjs)
 public/camera-data/
+src/layers/cctv.archived-old.mjs
+server/proxy.archived-old.mjs
