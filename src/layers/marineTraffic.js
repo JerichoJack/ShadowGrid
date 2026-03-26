@@ -189,7 +189,8 @@ function applyVesselSnapshot(vessels = []) {
         record.point.label.text = vessel.name || vesselId;
         record.point.label.fillColor = color;
         record.point.properties = new Cesium.PropertyBag({
-          type: vesselType,
+          type: 'vessel',
+          vesselType: vesselType,
           shipType: vessel.type,
           speed: vessel.speed ?? 'N/A',
           heading: vessel.heading ?? 'N/A',
@@ -225,7 +226,8 @@ function applyVesselSnapshot(vessels = []) {
             scale: 0.9,
           },
           properties: {
-            type: vesselType,
+            type: 'vessel',
+            vesselType: vesselType,
             shipType: vessel.type,
             speed: vessel.speed ?? 'N/A',
             heading: vessel.heading ?? 'N/A',
