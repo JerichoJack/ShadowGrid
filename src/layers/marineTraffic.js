@@ -16,7 +16,82 @@ const VESSEL_COLOR_CARGO = new Cesium.Color(0.2, 0.6, 1.0, 0.8); // Blue for car
 const VESSEL_COLOR_TANKER = new Cesium.Color(0.8, 0.4, 0.2, 0.8); // Orange for tanker
 const VESSEL_COLOR_PASSENGER = new Cesium.Color(0.0, 1.0, 0.6, 0.8); // Green for passenger
 const VESSEL_COLOR_FISHING = new Cesium.Color(1.0, 0.8, 0.0, 0.8); // Yellow for fishing
+
 const VESSEL_COLOR_OTHER = new Cesium.Color(0.6, 0.6, 0.8, 0.8); // Light purple for other
+
+// --- SVG icon logic for ship types ---
+const SHIP_SVG_SHAPES = {
+  cargo: {
+    path: 'M4 28 L28 28 L24 20 L8 20 Z', // simple hull
+    accent: 'M8 20 L24 20',
+    viewBox: '0 0 32 32',
+  },
+  tanker: {
+    path: 'M6 28 Q16 18 26 28 Z', // rounded hull
+    accent: 'M10 24 Q16 20 22 24',
+    viewBox: '0 0 32 32',
+  },
+  passenger: {
+    path: 'M4 28 L28 28 L20 16 L12 16 Z', // cruise/ferry
+    accent: 'M12 16 L20 16',
+    viewBox: '0 0 32 32',
+  },
+  fishing: {
+    path: 'M8 28 L24 28 L16 18 Z', // trawler
+    accent: 'M16 18 L16 24',
+    viewBox: '0 0 32 32',
+  },
+  other: {
+    path: 'M10 28 L22 28 L16 22 Z', // generic
+    accent: '',
+    viewBox: '0 0 32 32',
+  },
+};
+
+// --- Click-to-info logic for vessels ---
+function showVesselInfo(entity) {
+  if (!entity || !entity.properties) return;
+  const props = entity.properties;
+  const name = entity.label?.text?.getValue() || 'Vessel';
+  const type = props.type?.getValue() || 'Unknown';
+  const shipType = props.shipType?.getValue() || '';
+  const speed = props.speed?.getValue() || 'N/A';
+  const heading = props.heading?.getValue() || 'N/A';
+  const source = props.source?.getValue() || 'live';
+  const html = `
+    <b>${name}</b><br/>
+    <b>Type:</b> ${type} ${shipType ? '(' + shipType + ')' : ''}<br/>
+    <b>Speed:</b> ${speed} kn<br/>
+    <b>Heading:</b> ${heading}&deg;<br/>
+    <b>Source:</b> ${source}
+  `;
+  // Use Cesium's InfoBox or fallback to alert
+  if (viewer && viewer.selectedEntity !== entity) {
+    viewer.selectedEntity = entity;
+    if (viewer.infoBox) {
+      viewer.infoBox.viewModel.showInfo = true;
+      viewer.infoBox.viewModel.titleText = name;
+      viewer.infoBox.viewModel.description = html;
+    }
+  } else {
+    // fallback
+    window.alert(html.replace(/<[^>]+>/g, ''));
+  }
+}
+
+function buildShipSvgUri(type, color) {
+  const shape = SHIP_SVG_SHAPES[type] || SHIP_SVG_SHAPES.other;
+  const fill = color.toCssColorString();
+  const stroke = '#222';
+  const sw = 2;
+  let svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${shape.viewBox}" width="32" height="32">`;
+  svg += `<path fill="${fill}" stroke="${stroke}" stroke-width="${sw}" d="${shape.path}"/>`;
+  if (shape.accent) {
+    svg += `<path fill="none" stroke="#fff" stroke-width="1" d="${shape.accent}"/>`;
+  }
+  svg += '</svg>';
+  return 'data:image/svg+xml;utf8,' + encodeURIComponent(svg);
+}
 
 let enabled = false;
 let viewer = null;
@@ -131,8 +206,9 @@ function applyVesselSnapshot(vessels = []) {
       if (vesselEntities.has(vesselId)) {
         const record = vesselEntities.get(vesselId);
         record.point.position = Cesium.Cartesian3.fromDegrees(vessel.lon, vessel.lat, 10);
+        record.point.billboard.image = buildShipSvgUri(vesselType, color);
+        record.point.billboard.color = color;
         record.point.label.text = vessel.name || vesselId;
-        record.point.point.color = color;
         record.point.label.fillColor = color;
         record.point.properties = new Cesium.PropertyBag({
           type: vesselType,
@@ -146,17 +222,17 @@ function applyVesselSnapshot(vessels = []) {
         record.track.show = enabled;
         record.trail = track;
       } else {
-
         const pointEntity = viewer.entities.add({
           id: `marine-point-${vesselId}`,
           position: Cesium.Cartesian3.fromDegrees(vessel.lon, vessel.lat, 10),
-          point: {
-            pixelSize: 6,
-            color,
-            outlineColor: Cesium.Color.WHITE,
-            outlineWidth: 1,
+          billboard: {
+            image: buildShipSvgUri(vesselType, color),
+            color: color,
+            scale: 1.0,
+            verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
             heightReference: Cesium.HeightReference.NONE,
-            height: 10,
+            disableDepthTestDistance: Number.POSITIVE_INFINITY,
+            eyeOffset: new Cesium.Cartesian3(0, 0, 0),
           },
           label: {
             text: vessel.name || vesselId,
@@ -229,6 +305,18 @@ function setEntityVisibility(show) {
  */
 export async function initMarineTraffic(viewer_) {
   viewer = viewer_;
+
+  // Add click handler for vessel info
+  if (viewer && !viewer._marineTrafficClickHandler) {
+    const handler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
+    handler.setInputAction(function (movement) {
+      const picked = viewer.scene.pick(movement.position);
+      if (picked && picked.id && picked.id.id && String(picked.id.id).startsWith('marine-point-')) {
+        showVesselInfo(picked.id);
+      }
+    }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
+    viewer._marineTrafficClickHandler = handler;
+  }
 
   if (SERVER_HEAVY_MODE) {
     subscribeServerSnapshot('marine', {
