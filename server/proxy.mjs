@@ -864,6 +864,9 @@ async function waitForPlaylist(playlistPath, timeoutMs = CAMERA_STREAM_BOOT_TIME
 
 async function handleCameraStreamProxy(queryParams, res) {
   const sourceUrl = queryParams.get('url') || '';
+  // Always set CORS headers for all responses
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Headers', '*');
   if (!sourceUrl) {
     if (res.headersSent) return;
     res.writeHead(400, { 'Content-Type': 'application/json' });
@@ -894,7 +897,7 @@ async function handleCameraStreamProxy(queryParams, res) {
 
     if (!upstream.ok) {
       if (res.headersSent) return;
-      res.writeHead(upstream.status, { 'Content-Type': 'application/json' });
+      res.writeHead(upstream.status, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*' });
       if (res.headersSent) return;
       res.end(JSON.stringify({ error: `upstream ${upstream.status}` }));
       return;
@@ -909,6 +912,8 @@ async function handleCameraStreamProxy(queryParams, res) {
       res.writeHead(200, {
         'Content-Type': 'application/vnd.apple.mpegurl',
         'Cache-Control': 'no-store, max-age=0',
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Headers': '*',
       });
       if (res.headersSent) return;
       res.end(rewritten);
@@ -919,6 +924,8 @@ async function handleCameraStreamProxy(queryParams, res) {
     res.writeHead(200, {
       'Content-Type': contentType || guessMimeByName(parsed.pathname),
       'Cache-Control': 'no-store, max-age=0',
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Headers': '*',
     });
     if (res.headersSent) return;
     res.end(body);
@@ -929,7 +936,7 @@ async function handleCameraStreamProxy(queryParams, res) {
     const hasFfmpeg = await ensureFfmpegAvailable();
     if (!hasFfmpeg) {
       if (res.headersSent) return;
-      res.writeHead(501, { 'Content-Type': 'application/json' });
+      res.writeHead(501, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*' });
       if (res.headersSent) return;
       res.end(JSON.stringify({ error: 'ffmpeg not available on server for RTMP/RTSP conversion' }));
       return;
@@ -940,7 +947,7 @@ async function handleCameraStreamProxy(queryParams, res) {
     const ready = await waitForPlaylist(session.playlistPath);
     if (!ready) {
       if (res.headersSent) return;
-      res.writeHead(503, { 'Content-Type': 'application/json' });
+      res.writeHead(503, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*' });
       if (res.headersSent) return;
       res.end(JSON.stringify({ error: 'transcoder warming up' }));
       return;
@@ -959,13 +966,15 @@ async function handleCameraStreamProxy(queryParams, res) {
     res.writeHead(200, {
       'Content-Type': 'application/vnd.apple.mpegurl',
       'Cache-Control': 'no-store, max-age=0',
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Headers': '*',
     });
     if (res.headersSent) return;
     res.end(rewritten);
     return;
   }
 
-  res.writeHead(400, { 'Content-Type': 'application/json' });
+  res.writeHead(400, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*' });
   if (res.headersSent) return;
   res.end(JSON.stringify({ error: `unsupported protocol: ${protocol}` }));
 }
