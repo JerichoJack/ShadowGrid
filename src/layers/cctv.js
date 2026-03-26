@@ -787,16 +787,16 @@ function renderPanel(cam) {
       getCameraStreamHealth().then((health) => {
         if (!transcodeNote) return;
         if (!health) {
-          transcodeNote.textContent = 'Server transcoder status unavailable. Ensure /api/localproxy/api/cameras/stream/health is reachable.';
+          transcodeNote.textContent = 'Server transcoder status unavailable. Ensure /api/cameras/stream/health is reachable.';
           return;
         }
         if (health.ffmpegAvailable) {
-          transcodeNote.textContent = `Server transcoder ready (ffmpeg detected). Source protocol: ${protocolLabel}.`;
+          transcodeNote.textContent = `Server transcoder ready (ffmpeg detected). Source protocol: ${kind.toUpperCase()}.`;
           transcodeNote.style.borderColor = 'rgba(0,255,136,0.35)';
           transcodeNote.style.background = 'rgba(0,255,136,0.08)';
           transcodeNote.style.color = 'rgba(180,255,220,0.92)';
         } else {
-          transcodeNote.textContent = `Server transcoder unavailable: ffmpeg not installed. Source protocol: ${protocolLabel}.`;
+          transcodeNote.textContent = `Server transcoder unavailable: ffmpeg not installed. Source protocol: ${kind.toUpperCase()}.`;
           transcodeNote.style.borderColor = 'rgba(255,100,100,0.35)';
           transcodeNote.style.background = 'rgba(255,100,100,0.08)';
           transcodeNote.style.color = 'rgba(255,180,180,0.92)';
