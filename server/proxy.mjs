@@ -5008,13 +5008,13 @@ async function getMarinePayload(bounds) {
         BoundingBoxes: [ [ [minLat, minLon], [maxLat, maxLon] ] ],
         FilterMessageTypes: ["PositionReport"]
       }));
-      // Set a timeout to close after 2 seconds (rate limit: 1 req/sec)
-      timeout = setTimeout(() => ws.close(), 2000);
+      // Set a timeout to close after 10 seconds (rate limit: 1 req/sec)
+      timeout = setTimeout(() => ws.close(), 10000);
     });
 
     ws.on('message', (data) => {
       try {
-        // console.log('[aisstream] Message received:', data.toString());
+        console.log('[aisstream] Message received:', data.toString());
         const msg = JSON.parse(data);
         if (msg && msg.MessageType === 'PositionReport' && msg.Message && msg.Message.PositionReport && msg.MetaData) {
           const m = msg.Message.PositionReport;
