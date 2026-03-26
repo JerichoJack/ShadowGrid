@@ -2189,40 +2189,6 @@ function initEntityPicker(viewer) {
     }
 
     if (type === 'flight') {
-      // --- Vessel info panel renderer ---
-      function renderVesselPanel(panel, data, viewer, entity) {
-        const { id, name, vesselType, shipType, speed, heading, source } = data;
-        const icon = '🚢';
-        panel.innerHTML = `
-          <div style="background:rgba(0,0,0,0.3);padding:12px 16px;border-bottom:1px solid #2196f344;border-left:3px solid #2196f3">
-            <div style="display:flex;align-items:center;gap:10px">
-              <span style="font-size:20px;color:#2196f3">${icon}</span>
-              <div>
-                <div style="font-size:15px;font-weight:bold;letter-spacing:0.12em;color:#fff">
-                  <span title="Vessel Name">${name}</span>
-                </div>
-                <div style="opacity:0.55;font-size:10px;margin-top:1px">
-                  <span title="Vessel ID">ID: ${id}</span>
-                </div>
-              </div>
-              <div style="display:flex;align-items:center;gap:8px;margin-left:auto">
-                <span style="font-size:9px;font-weight:bold;color:#2196f3;border:1px solid #2196f355;padding:2px 6px;border-radius:3px;letter-spacing:0.1em">VESSEL</span>
-                <span style="cursor:pointer;opacity:0.5;font-size:14px" id="panel-close">✕</span>
-              </div>
-            </div>
-          </div>
-
-          <div style="padding:10px 16px">
-            <table style="width:100%;border-collapse:collapse;font-size:11px">
-              <tr><td style="opacity:0.5;padding-right:12px;white-space:nowrap">Type</td><td style="font-weight:500">${vesselType}${shipType ? ' (' + shipType + ')' : ''}</td></tr>
-              <tr><td style="opacity:0.5;padding-right:12px;white-space:nowrap">Speed</td><td style="font-weight:500">${speed} kn</td></tr>
-              <tr><td style="opacity:0.5;padding-right:12px;white-space:nowrap">Heading</td><td style="font-weight:500">${heading}&deg;</td></tr>
-              <tr><td style="opacity:0.5;padding-right:12px;white-space:nowrap">Source</td><td style="font-weight:500">${source}</td></tr>
-            </table>
-          </div>
-        `;
-        wirePanelClose(panel);
-      }
       clearSatelliteSelection();
       const icao     = (props.icao?.getValue() ?? String(entity.id).replace('flight-','')).toUpperCase();
       const rawCallsign = (props.callsign?.getValue() ?? '').trim();
@@ -2355,6 +2321,20 @@ function initEntityPicker(viewer) {
       wireFollowButton(panel, viewer, entity, name, 'satellite');
       wirePanelClose(panel);
 
+    } else if (type === 'vessel') {
+      clearSatelliteSelection();
+      const name     = props.name?.getValue() || entity.label?.text?.getValue() || entity.id || 'Vessel';
+      const vesselType = props.type?.getValue() || 'Unknown';
+      const shipType = props.shipType?.getValue() || '';
+      const speed    = props.speed?.getValue() || 'N/A';
+      const heading  = props.heading?.getValue() || 'N/A';
+      const source   = props.source?.getValue() || 'live';
+      const id       = entity.id || name;
+      panel.style.display = 'block';
+      renderVesselPanel(panel, { id, name, vesselType, shipType, speed, heading, source }, viewer, entity);
+      wireFollowButton(panel, viewer, entity, name, 'vessel');
+      wirePanelClose(panel);
+
     } else if (type === 'zone') {
       if (currentSelectedFlightId) {
         setFlightGlow(currentSelectedFlightId, false);
@@ -2389,6 +2369,52 @@ function initEntityPicker(viewer) {
       wirePanelClose(panel);
     }
   }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
+}
+
+function renderVesselPanel(panel, data, viewer, entity) {
+  const { id, name, vesselType, shipType, speed, heading, source } = data;
+  const icon = '🚢';
+  panel.innerHTML = `
+          <div style="background:rgba(0,0,0,0.3);padding:12px 16px;border-bottom:1px solid #2196f344;border-left:3px solid #2196f3">
+            <div style="display:flex;align-items:center;gap:10px">
+              <span style="font-size:20px;color:#2196f3">${icon}</span>
+              <div>
+                <div style="font-size:15px;font-weight:bold;letter-spacing:0.12em;color:#fff">
+                  <span title="Vessel Name">${name}</span>
+                </div>
+                <div style="opacity:0.55;font-size:10px;margin-top:1px">
+                  <span title="Vessel ID">ID: ${id}</span>
+                </div>
+              </div>
+              <div style="display:flex;align-items:center;gap:8px;margin-left:auto">
+                <span style="font-size:9px;font-weight:bold;color:#2196f3;border:1px solid #2196f355;padding:2px 6px;border-radius:3px;letter-spacing:0.1em">VESSEL</span>
+                <span style="cursor:pointer;opacity:0.5;font-size:14px" id="panel-close">✕</span>
+              </div>
+            </div>
+          </div>
+
+          <div style="padding:10px 16px">
+            <table style="width:100%;border-collapse:collapse;font-size:11px">
+              <tr><td style="opacity:0.5;padding-right:12px;white-space:nowrap">Type</td><td style="font-weight:500">${vesselType}${shipType ? ' (' + shipType + ')' : ''}</td></tr>
+              <tr><td style="opacity:0.5;padding-right:12px;white-space:nowrap">Speed</td><td style="font-weight:500">${speed} kn</td></tr>
+              <tr><td style="opacity:0.5;padding-right:12px;white-space:nowrap">Heading</td><td style="font-weight:500">${heading}&deg;</td></tr>
+              <tr><td style="opacity:0.5;padding-right:12px;white-space:nowrap">Source</td><td style="font-weight:500">${source}</td></tr>
+            </table>
+            <div style="margin-top:12px;display:flex;gap:8px;justify-content:flex-end">
+              <button id="vessel-unfollow-btn" style="background:rgba(0,0,0,0.5);border:1px solid #2196f3;color:#2196f3;font-family:'Share Tech Mono',monospace;font-size:10px;letter-spacing:0.08em;padding:4px 10px;cursor:pointer;border-radius:2px;">Unfollow</button>
+            </div>
+          </div>
+        `;
+  wirePanelClose(panel);
+  // Unfollow button logic
+  const unfollowBtn = panel.querySelector('#vessel-unfollow-btn');
+  if (unfollowBtn) {
+    unfollowBtn.addEventListener('click', () => {
+      // Try to exit follow mode if following this vessel
+      if (typeof stopFollow === 'function') stopFollow();
+      // Optionally, you can also reset camera or update UI here
+    });
+  }
 }
 
 function collectPickedEntities(viewer, position) {
