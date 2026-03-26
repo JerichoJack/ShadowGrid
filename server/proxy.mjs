@@ -4979,25 +4979,29 @@ async function getMarinePayload(bounds) {
       try {
         console.log('[aisstream] Message received:', data.toString());
         const msg = JSON.parse(data);
-        if (msg && msg.MessageType === 'PositionReport' && msg.Message) {
-          const m = msg.Message;
-          // Filter by bounds (defensive)
-          if (m.Lon >= minLon && m.Lon <= maxLon && m.Lat >= minLat && m.Lat <= maxLat) {
-            vessels.set(m.MMSI, {
-              id: `aisstream-${m.MMSI}`,
-              lat: m.Lat,
-              lon: m.Lon,
-              name: m.ShipName || `AIS ${m.MMSI}`,
-              type: String(m.ShipType || '').toLowerCase(),
-              speed: m.SOG ?? null,
-              heading: m.COG ?? null,
+        if (msg && msg.MessageType === 'PositionReport' && msg.Message && msg.Message.PositionReport && msg.MetaData) {
+          const m = msg.Message.PositionReport;
+          const meta = msg.MetaData;
+          // Defensive: prefer MetaData for MMSI, ShipName, lat/lon
+          const mmsi = meta.MMSI || meta.MMSI_String || m.UserID;
+          const lat = meta.latitude || m.Latitude;
+          const lon = meta.longitude || m.Longitude;
+          if (lat >= minLat && lat <= maxLat && lon >= minLon && lon <= maxLon) {
+            vessels.set(mmsi, {
+              id: `aisstream-${mmsi}`,
+              lat,
+              lon,
+              name: meta.ShipName?.trim() || `AIS ${mmsi}`,
+              type: '', // ShipType not provided in PositionReport
+              speed: m.Sog ?? m.SOG ?? null,
+              heading: m.Cog ?? m.COG ?? null,
               simulated: false,
               tags: {
-                ship: String(m.ShipType || '').toLowerCase(),
-                mmsi: m.MMSI,
-                imo: m.IMO ?? null,
+                ship: '',
+                mmsi,
+                imo: null,
               },
-              track: buildTrackPoints(m.Lat, m.Lon, m.COG ?? 0, m.SOG ?? 8),
+              track: buildTrackPoints(lat, lon, m.Cog ?? m.COG ?? 0, m.Sog ?? m.SOG ?? 8),
             });
           }
         }
