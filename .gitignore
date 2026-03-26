@@ -12,3 +12,4 @@ package-lock.json
 public/camera-data/
 src/layers/cctv.archived-old.mjs
 server/proxy.archived-old.mjs
+server/proxy.archived-new.mjs
