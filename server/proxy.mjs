@@ -4917,10 +4917,16 @@ async function getMarinePayload(bounds) {
   const errors = [];
 
   const providerOrder = (() => {
+    // Explicit override
     if (BACKEND_MARINE_PROVIDER === 'ais') return ['ais'];
     if (BACKEND_MARINE_PROVIDER === 'aisstream') return ['aisstream'];
     if (BACKEND_MARINE_PROVIDER === 'overpass') return ['overpass'];
-    // auto: prefer aisstream if key, then AIS proxy, then Overpass.
+    // 'auto' or unset: prefer best free provider with no API key required
+    if (!BACKEND_MARINE_PROVIDER || BACKEND_MARINE_PROVIDER === 'auto') {
+      if (AIS_PROXY_URL) return ['ais', 'overpass'];
+      return ['overpass'];
+    }
+    // Fallback: if API key is present, allow aisstream
     if (AISSTREAM_API_KEY) return ['aisstream', 'ais', 'overpass'];
     if (AIS_PROXY_URL) return ['ais', 'overpass'];
     return ['overpass'];
@@ -4937,33 +4943,25 @@ async function getMarinePayload(bounds) {
           b[0] <= -179.9 && b[1] <= -89.9 && b[2] >= 179.9 && b[3] >= 89.9
         ) || (typeof bounds === 'string' && bounds.toLowerCase() === 'global');
         if (isGlobal) {
-          console.log('[aisstream] Global mode: subscribing to all grid cells...');
+          console.log('[aisstream] Global mode: subscribing to all grid cells (sequential throttle)...');
           const allVessels = new Map();
-          // Limit concurrency to avoid rate limits (aisstream: 1/sec per connection)
-          const MAX_CONCURRENCY = 4;
-          let idx = 0;
-          async function fetchBatch(batch) {
-            await Promise.all(batch.map(async (hub) => {
-              // Each hub is {lat, lon}; create a bounding box of ~10x10 deg around it
-              const halfSize = 5; // degrees
-              const minLat = Math.max(-90, hub.lat - halfSize);
-              const maxLat = Math.min(90, hub.lat + halfSize);
-              const minLon = Math.max(-180, hub.lon - halfSize);
-              const maxLon = Math.min(180, hub.lon + halfSize);
-              try {
-                const vessels = await fetchAisstreamVessels([minLon, minLat, maxLon, maxLat]);
-                for (const v of vessels) {
-                  if (v && v.id) allVessels.set(v.id, v);
-                }
-              } catch (err) {
-                console.warn(`[aisstream] Hub fetch failed: ${hub.lat},${hub.lon} — ${err.message}`);
+          // Strictly sequential: one connection at a time, with delay between
+          for (const hub of ALL_HUBS) {
+            const halfSize = 5; // degrees
+            const minLat = Math.max(-90, hub.lat - halfSize);
+            const maxLat = Math.min(90, hub.lat + halfSize);
+            const minLon = Math.max(-180, hub.lon - halfSize);
+            const maxLon = Math.min(180, hub.lon + halfSize);
+            try {
+              const vessels = await fetchAisstreamVessels([minLon, minLat, maxLon, maxLat]);
+              for (const v of vessels) {
+                if (v && v.id) allVessels.set(v.id, v);
               }
-            }));
-          }
-          while (idx < ALL_HUBS.length) {
-            const batch = ALL_HUBS.slice(idx, idx + MAX_CONCURRENCY);
-            await fetchBatch(batch);
-            idx += MAX_CONCURRENCY;
+            } catch (err) {
+              console.warn(`[aisstream] Hub fetch failed: ${hub.lat},${hub.lon} — ${err.message}`);
+            }
+            // Throttle: wait 1500ms between each connection to avoid rate limit
+            await new Promise(res => setTimeout(res, 1500));
           }
           vessels = Array.from(allVessels.values());
           source = 'aisstream-live-server-global';
