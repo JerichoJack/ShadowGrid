@@ -35,7 +35,6 @@ FLIR Filter during 3D Flight Model Tracking
 ## 🧱 Tech Stack
 
 | Layer | Technology |
-|---|---|
 | 3D Globe & Rendering | [CesiumJS](https://cesium.com/platform/cesiumjs/) |
 | Photorealistic City Models | Google Photorealistic 3D Tiles / Cesium ion / MapTiler *(switchable)* |
 | Visual Shaders | WebGL `PostProcessStage` (inline GLSL) + CSS overlays |
@@ -59,7 +58,6 @@ FLIR Filter during 3D Flight Model Tracking
 Set `VITE_MAP_PROVIDER` in your `.env` to switch instantly — no code changes required.
 
 | Provider | Visual Quality | Cost | Credit Card? | Notes |
-|---|---|---|---|---|
 | `cesium` | ⭐⭐ Terrain + Bing satellite + OSM buildings | 100% free | ❌ No | **Recommended default** |
 | `google` | ⭐⭐⭐ Photogrammetric city models | Free tier ($200/mo credit) | ✅ Required | Best possible visuals; falls back to `cesium` if key is missing |
 | `maptiler` | ⭐⭐ Quantized-mesh terrain + satellite | 100% free tier | ❌ No | Falls back to `cesium` if key is missing |
@@ -73,7 +71,6 @@ Set `VITE_MAP_PROVIDER` in your `.env` to switch instantly — no code changes r
 Set `VITE_FLIGHT_PROVIDER` in your `.env` to switch.
 
 | Provider | Coverage | Cost | Account / Key? | Notes |
-|---|---|---|---|---|
 | `airplaneslive` | Global, unfiltered ADS-B + MLAT | Free | ❌ None required | Great fallback when OpenSky is limited or unavailable |
 | `adsbool` | Global, unfiltered | Free | ❌ None required | ADS-B Exchange drop-in replacement; includes military and untracked flights; ODbL licensed |
 | *(default)* `opensky` | Global, ~10k aircraft | Free (non-commercial) | ✅ OAuth2 client credentials | **Recommended default**; strongest live density in test runs; 4,000 credits/day authenticated |
@@ -88,7 +85,6 @@ Set `VITE_FLIGHT_PROVIDER` in your `.env` to switch.
 Set `VITE_SATELLITE_PROVIDER` in your `.env` to switch.
 
 | Provider | Objects | Cost | Account / Key? | Notes |
-|---|---|---|---|---|
 | `celestrak` | 20,000+ | Free | ❌ None required | **Recommended default when site is working**; uses GP TLE endpoint; transitioning to OMM format for catalog numbers > 69,999 (~July 2026) |
 | `spacetrack` | Full catalog | Free | ✅ Free account (login) | Authoritative US Space Force data (18th Space Defense Squadron) |
 | `n2yo` | Targeted queries | Free tier (1k req/hr) | ✅ Free API key | Better for per-satellite lookups |
@@ -100,7 +96,6 @@ Set `VITE_SATELLITE_PROVIDER` in your `.env` to switch.
 Set `VITE_TRAFFIC_PROVIDER` in your `.env` to switch.
 
 | Provider | Source | Cost | Key Required? | Notes |
-|---|---|---|---|---|
 | `auto` | Google Routes API or OSM | Mixed | ✅ If Google path used | **Recommended default**; uses Google live traffic when `VITE_GOOGLE_MAPS_API_KEY` is present, otherwise falls back to OSM simulation |
 | `google` | Google Routes API (`TRAFFIC_ON_POLYLINE`) | Paid usage tier | ✅ Yes | Real-time traffic speed intervals (`NORMAL` / `SLOW` / `TRAFFIC_JAM`) along sampled city routes |
 | `osm` | OpenStreetMap Overpass road geometry | Free | ❌ No | Simulated vehicle flow with local-time density profile + terrain-aligned particles |
@@ -206,7 +201,6 @@ The HUD Imagery panel now pulls preview imagery through the local proxy route `/
 - The viewer enforces backend policy by collection authority, while still allowing configured credential-backed backends when available:
 
 | Authority | Preferred Backend | Credentials Required? |
-|---|---|---|
 | ESA Copernicus | Copernicus Data Space | ✅ Yes |
 | ESA Copernicus / Sentinel-5P | Copernicus Data Space | ✅ Yes |
 | NASA / USGS (Landsat) | Copernicus Data Space | ✅ Yes |
@@ -264,7 +258,31 @@ cd ShadowGrid
 npm install
 ```
 
-### Minimum viable setup (fully free, zero cost, no credit card)
+#### Debian/Ubuntu: Install as a systemd Service
+
+To install ShadowGrid as a managed service (auto-start on boot, runs proxy server as its own user):
+
+```bash
+git clone https://github.com/JerichoJack/ShadowGrid.git
+cd ShadowGrid
+sudo bash scripts/install-debian.sh
+```
+
+This will:
+    - Install Node.js 18+ if missing
+    - Create a dedicated user/group (`shadowgrid`)
+    - Copy files to `/opt/shadowgrid`
+    - Run `npm install` as the service user
+    - Register and start the `shadowgrid.service` systemd unit
+
+To uninstall (removes the service, user, and group, but leaves your app data):
+
+```bash
+cd ShadowGrid
+sudo bash scripts/uninstall-debian.sh
+```
+
+#### Manual/Local Setup
 
 ```bash
 cp .env.example .env
@@ -277,7 +295,6 @@ VITE_MAP_PROVIDER=cesium
 VITE_CESIUM_ION_TOKEN=your_cesium_ion_token_here
 
 VITE_FLIGHT_PROVIDER=opensky
-
 VITE_SATELLITE_PROVIDER=celestrak
 VITE_SATELLITE_IMAGERY_PROVIDER=auto
 ```
@@ -375,7 +392,7 @@ npm run dev -- --host --server
 
 ## 📁 Project Structure
 
-```
+```md
 ShadowGrid/
 ├── server/
 │   ├── proxy.mjs              # Node.js data proxy + snapshot hub
@@ -433,7 +450,6 @@ ShadowGrid/
 ## 🎨 Shader Modes
 
 | Mode | Description |
-|---|---|
 | **Normal** | Default photorealistic view |
 | **NVG** | Green-channel night vision with noise grain and vignette (WebGL + CSS radial overlay) |
 | **FLIR** | Thermal false-color (iron palette) simulating infrared sensors |

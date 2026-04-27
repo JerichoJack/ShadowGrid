@@ -1,6 +1,5 @@
 node_modules/
 dist/
-.env
 *.local
 .DS_Store
 *.msi
@@ -8,8 +7,15 @@ package-lock.json
 *.zip
 *.pdf
 
+# Testing Scripts
+scripts\outputs
+scripts\Testing
+
+# Cache files
+server\cache\world-snapshot-cache.json
+
 # Generated camera database (rebuild with: node server/collectors/collectCameras.mjs)
 public/camera-data/
-src/layers/cctv.archived-old.mjs
-server/proxy.archived-old.mjs
-server/proxy.archived-new.mjs
+
+# Env files (should be created by the user with their own values)
+.env
