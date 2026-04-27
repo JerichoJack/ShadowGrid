@@ -275,6 +275,8 @@ This will:
     - Run `npm install` as the service user
     - Register and start the `shadowgrid.service` systemd unit
 
+> ⚠️ If you plan on using tunnels or public URL, you need to adjust `allowedHosts:` within `vite.config.js`.
+
 To uninstall (removes the service, user, and group, but leaves your app data):
 
 ```bash
@@ -454,7 +456,6 @@ ShadowGrid/
 | **NVG** | Green-channel night vision with noise grain and vignette (WebGL + CSS radial overlay) |
 | **FLIR** | Thermal false-color (iron palette) simulating infrared sensors |
 | **CRT** | Retro scanline overlay with barrel distortion and phosphor bloom |
-| **Anime** | Cel-shading via Sobel edge detection + quantized color bands |
 
 ---
 
